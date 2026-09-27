@@ -1,0 +1,97 @@
+/* ================================================================
+   MOBILE OPTIMIZATION
+   Dipisah dari layout.css supaya mudah dirawat terpisah.
+   Breakpoint 1023px dipilih karena sama dengan titik saat sidebar
+   (#left-aside) berubah dari 2 kolom (desktop) jadi tumpukan (HP/tablet).
+   Breakpoint 767px dipakai untuk kepadatan header yang lebih agresif,
+   karena di situ header mulai terasa sempit/overflow di HP.
+   ================================================================ */
+
+/* ---------- 1) Sidebar tab (Peta, Pesanan SPBU, dst) jadi Bottom Nav Bar ---------- */
+@media (max-width: 1023.98px) {
+    #sidebar-tab-nav{
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        z-index: 3000;
+        width: auto;
+        background: #0b0f17;
+        border-right: none;
+        border-top: 1px solid #1f2937;
+        display: flex;
+        flex-direction: row;
+        overflow-x: auto;
+        padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+        box-shadow: 0 -6px 22px rgba(0,0,0,.45);
+    }
+    #sidebar-tab-nav .tab-btn{
+        position: relative;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        gap: 3px;
+        min-width: 58px;
+        padding: 6px 6px;
+        font-size: 9px;
+        line-height: 1.1;
+    }
+    #sidebar-tab-nav .tab-btn .ml-auto{
+        margin-left: 0;
+        position: absolute;
+        top: 1px;
+        right: 4px;
+    }
+    /* Aside tidak lagi butuh tinggi 60vh, karena menu tab sudah lepas jadi bottom bar */
+    #left-aside{ max-height: none; }
+
+    /* Beri jarak bawah supaya baris/tombol terakhir tidak ketutup bottom nav */
+    #tab-popup-body, #tab-content-panel{ padding-bottom: 84px; }
+}
+
+/* ---------- 2) Header: dirapatkan & tombol jadi ikon saja (gaya app HP) ---------- */
+@media (max-width: 767.98px) {
+    header{ padding: .45rem .55rem; gap: .4rem; }
+
+    /* Baris identitas: logo, nama app, notif, jam game, nama perusahaan */
+    #header-top-row{ gap: .35rem; }
+    #header-top-row > div{ gap: .35rem; }
+    #header-top-row .rounded-xl{ padding: .2rem .55rem .2rem .3rem; gap: 6px; }
+    #header-top-row .w-7.h-7{ width: 20px; height: 20px; }
+    #notif-wrap button{ width: 30px; height: 30px; }
+    #sound-toggle-btn{ width: 30px; height: 30px; }
+    #kpis-company{ max-width: 76px; font-size: 11px; }
+    #game-time{ font-size: 10px; }
+
+    /* "Manager ID" disembunyikan di layar sempit - logo MIGAS sudah cukup jadi identitas */
+    @media (max-width: 420px){
+        #header-top-row h1{ display: none; }
+    }
+
+    /* Strip KPI (Kas, Armada Truk, Total SDM, SPBU) */
+    #header-kpi-row{ gap: 6px; }
+    #header-kpi-row > div{ padding: .2rem .5rem .2rem .3rem; gap: 6px; }
+    #header-kpi-row .w-7.h-7{ width: 20px; height: 20px; }
+    #header-kpi-row span{ font-size: 10.5px; }
+    #header-kpi-row #kpis-cash{ font-size: 11.5px; }
+
+    /* Tombol Aksi (Tutorial, Jeda, Top Up, Peringkat, Save Cloud, Akun) -> ikon bulat saja */
+    #header-actions-row{ gap: 6px; }
+    #header-actions-row > button,
+    #header-actions-row > div > button{
+        padding: 0;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 9999px;
+        font-size: 12px;
+    }
+    #header-actions-row .btn-label{ display: none; }
+    #header-actions-row i{ margin: 0 !important; font-size: 13px; }
+    #header-actions-row > div.rounded-full{ padding: 2px; gap: 2px; }
+    #header-actions-row #btn-cloud-load{ width: 24px; height: 24px; }
+    #header-actions-row #topup-badge{
+        position: absolute; top: -3px; right: -3px; margin-left: 0;
+    }
+}

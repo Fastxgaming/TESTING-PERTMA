@@ -27,6 +27,7 @@
     <!-- Custom Stylesheets -->
     <link rel="stylesheet" href="css/theme.css">
     <link rel="stylesheet" href="css/layout.css">
+    <link rel="stylesheet" href="css/mobile.css">
 </head>
 <body class="bg-gray-950 text-gray-100 font-sans h-screen flex flex-col overflow-hidden">
 
@@ -161,7 +162,7 @@
 
     <!-- Top Navigation Bar -->
     <header class="bg-gray-900 bg-gradient-to-r from-teal-950/40 via-gray-900 to-gray-900 border-b border-gray-800 px-3 sm:px-6 py-2.5 flex flex-col gap-2 relative z-[2000] shadow-lg">
-        <div class="flex items-center justify-between flex-wrap gap-x-3 gap-y-1.5">
+        <div id="header-top-row" class="flex items-center justify-between flex-wrap gap-x-3 gap-y-1.5">
             <div class="flex items-center space-x-3">
                 <div class="relative bg-gradient-to-br from-teal-400 to-cyan-700 text-white font-black px-3 py-1 rounded-lg text-base sm:text-lg tracking-wider shadow-lg shadow-teal-900/40 whitespace-nowrap"><i class="fa-solid fa-gas-pump mr-1.5 text-base"></i>MIGAS</div>
                 <h1 class="text-sm sm:text-base font-bold text-gray-200">Manager ID</h1>
@@ -192,7 +193,7 @@
         </div>
         
         <!-- Key Performance Indicators Bar: strip scroll horizontal di HP, wrap bebas di layar lebar -->
-        <div class="flex items-center gap-2 text-xs overflow-x-auto scroll-smooth no-scrollbar scroll-fade-x -mx-3 px-3 sm:mx-0 sm:px-0 lg:flex-wrap lg:overflow-visible lg:justify-center">
+        <div id="header-kpi-row" class="flex items-center gap-2 text-xs overflow-x-auto scroll-smooth no-scrollbar scroll-fade-x -mx-3 px-3 sm:mx-0 sm:px-0 lg:flex-wrap lg:overflow-visible lg:justify-center">
             <div class="shrink-0 flex items-center gap-2 bg-gray-950/70 pl-1.5 pr-3 py-1 rounded-xl border border-gray-800 shadow-inner">
                 <span class="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center"><i class="fa-solid fa-wallet text-emerald-400 text-[11px]"></i></span>
                 <span class="text-gray-500">Kas:</span>
@@ -216,26 +217,26 @@
         </div>
 
         <!-- Tombol Aksi: strip scroll horizontal terpisah dari KPI supaya tidak numpuk di HP -->
-        <div class="flex items-center gap-2 text-xs overflow-x-auto scroll-smooth no-scrollbar scroll-fade-x -mx-3 px-3 sm:mx-0 sm:px-0 lg:flex-wrap lg:overflow-visible lg:justify-center">
+        <div id="header-actions-row" class="flex items-center gap-2 text-xs overflow-x-auto scroll-smooth no-scrollbar scroll-fade-x -mx-3 px-3 sm:mx-0 sm:px-0 lg:flex-wrap lg:overflow-visible lg:justify-center">
             <button onclick="openTutorial(false)" class="shrink-0 bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-400 hover:to-cyan-500 text-white font-semibold px-3.5 py-1.5 rounded-full text-xs transition shadow shadow-teal-900/30" title="Buka tutorial cara main">
-                <i class="fa-solid fa-circle-question mr-1"></i> Tutorial
+                <i class="fa-solid fa-circle-question mr-1"></i><span class="btn-label"> Tutorial</span>
             </button>
             <button id="btn-pause-toggle" class="shrink-0 bg-gray-950/70 border border-gray-800 hover:bg-gray-900 text-gray-200 font-semibold px-3.5 py-1.5 rounded-full text-xs transition shadow-inner">
-                <i class="fa-solid fa-pause mr-1"></i> Jeda
+                <i class="fa-solid fa-pause mr-1"></i><span class="btn-label"> Jeda</span>
             </button>
             <button id="btn-admin" onclick="openAdmin()" class="hidden shrink-0 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-bold px-3.5 py-1.5 rounded-full text-xs transition shadow" title="Panel admin: kirim top up ke pemain">
-                <i class="fa-solid fa-user-shield mr-1"></i> Admin
+                <i class="fa-solid fa-user-shield mr-1"></i><span class="btn-label"> Admin</span>
             </button>
-            <button onclick="openTopup()" class="shrink-0 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-gray-950 font-bold px-3.5 py-1.5 rounded-full text-xs transition shadow shadow-amber-900/30" title="Tambah saldo dengan pembayaran nyata">
-                <i class="fa-solid fa-wallet mr-1"></i> Top Up<span id="topup-badge" class="hidden animate-pulse ml-1.5 bg-red-600 text-white rounded-full px-1.5 text-[10px] font-black">0</span>
+            <button onclick="openTopup()" class="relative shrink-0 bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-gray-950 font-bold px-3.5 py-1.5 rounded-full text-xs transition shadow shadow-amber-900/30" title="Tambah saldo dengan pembayaran nyata">
+                <i class="fa-solid fa-wallet mr-1"></i><span class="btn-label"> Top Up</span><span id="topup-badge" class="hidden animate-pulse ml-1.5 bg-red-600 text-white rounded-full px-1.5 text-[10px] font-black">0</span>
             </button>
             <button onclick="switchTab('tab-leaderboard')" id="btn-tab-leaderboard" class="shrink-0 bg-gradient-to-b from-yellow-400 to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-gray-950 font-bold px-3.5 py-1.5 rounded-full text-xs transition shadow flex items-center" title="Lihat peringkat perusahaan">
-                <i class="fa-solid fa-trophy mr-1"></i><span>Peringkat</span>
+                <i class="fa-solid fa-trophy mr-1"></i><span class="btn-label">Peringkat</span>
             </button>
             <div class="shrink-0 flex items-center gap-2 bg-gray-950/70 px-2 py-1 rounded-full border border-gray-800 shadow-inner">
                 <button id="btn-cloud-save" onclick="manualCloudSave()" class="relative overflow-hidden bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 disabled:hover:from-sky-500 disabled:hover:to-blue-600 disabled:cursor-not-allowed text-white font-semibold px-3.5 py-1.5 rounded-full text-xs transition shadow" title="Simpan progres game ke cloud (proses 15 detik)">
                     <span id="cloud-bar" class="absolute inset-y-0 left-0 bg-sky-300/40" style="width:0;transition:width .3s linear"></span>
-                    <span class="relative"><i id="cloud-ico" class="fa-solid fa-cloud-arrow-up mr-1"></i><span id="cloud-label">Save Cloud</span></span>
+                    <span class="relative"><i id="cloud-ico" class="fa-solid fa-cloud-arrow-up mr-1"></i><span id="cloud-label" class="btn-label">Save Cloud</span></span>
                 </button>
                 <div class="leading-tight text-[10px] hidden sm:block"><div class="text-gray-500">Terakhir disimpan</div><div id="cloud-last" class="text-gray-300 font-mono">Belum pernah</div></div>
                 <button id="btn-cloud-load" onclick="manualCloudLoad()" class="shrink-0 bg-gray-950/70 hover:bg-gray-900 text-sky-400 hover:text-sky-300 font-semibold w-7 h-7 flex items-center justify-center rounded-full text-xs transition border border-gray-800" title="Muat progres dari cloud (menimpa progres di perangkat ini)">
@@ -243,7 +244,7 @@
                 </button>
             </div>
             <button onclick="openAccountModal()" class="shrink-0 bg-gray-950/70 hover:bg-gray-900 text-gray-200 font-semibold px-3.5 py-1.5 rounded-full text-xs transition border border-gray-800" title="Profil, reset/hapus akun, atau keluar">
-                <i class="fa-solid fa-user-gear mr-1"></i> Akun
+                <i class="fa-solid fa-user-gear mr-1"></i><span class="btn-label"> Akun</span>
             </button>
         </div>
     </header>
@@ -507,7 +508,7 @@
                  Peta (home) -> Pesanan & dispatch BBM/LPG (siklus utama) -> cek Armada/SDM (sebelum dispatch)
                  -> Kilang & Depo (pasokan) -> Dealer/Kapal/Mitra/Bursa (aksi ekspansi, lebih jarang)
                  -> Laporan (paling jarang, cuma dicek berkala). -->
-            <div class="w-full lg:w-36 bg-gray-950 border-r border-gray-800 flex flex-row lg:flex-col p-2 gap-1 shrink-0 overflow-x-auto scroll-smooth no-scrollbar scroll-fade-x lg:overflow-y-auto lg:custom-scrollbar">
+            <div id="sidebar-tab-nav" class="w-full lg:w-36 bg-gray-950 border-r border-gray-800 flex flex-row lg:flex-col p-2 gap-1 shrink-0 overflow-x-auto scroll-smooth no-scrollbar scroll-fade-x lg:overflow-y-auto lg:custom-scrollbar">
                 <button onclick="switchTab('tab-map-view')" class="tab-btn shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold flex items-center gap-2 border border-transparent transition text-emerald-300 bg-emerald-500/10 border-emerald-500/25 shadow-inner" id="btn-tab-map-view">
                     <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-map-location-dot text-[11px] text-blue-400"></i></span>
                     <span>Peta</span>
