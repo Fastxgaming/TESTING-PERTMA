@@ -339,6 +339,20 @@
             else speed = 80;                              // nyaris lurus & renggang, jarang ada belokan
             return Math.max(SPEED_RANGE.nontol[0], Math.min(SPEED_RANGE.nontol[1], speed));
         }
+        // Bikin daftar kecepatan NAIK/TURUN BERTAHAP dari satu ruas ke ruas berikutnya (mis. 55 > 60 > 70 > 80),
+        // dipakai supaya transisi jalan-biasa->tol->jalan-biasa tidak ditampilkan sebagai lompatan angka tunggal
+        // (55 lalu tiba-tiba 90), melainkan tahapan akselerasi/deselerasi yang lebih masuk akal & enak dibaca.
+        // Jarak antar tahap kira-kira 10 km/j (maksimal 4 tahap), lalu dibulatkan supaya angkanya rapi.
+        function speedRampSteps(from, to, maxSteps = 4) {
+            from = Math.round(from); to = Math.round(to);
+            if (from === to) return [from];
+            const dir = to > from ? 1 : -1, diff = Math.abs(to - from);
+            const stepCount = Math.min(maxSteps, Math.max(1, Math.round(diff / 10)));
+            const steps = [from];
+            for (let i = 1; i < stepCount; i++) steps.push(Math.round(from + dir * (diff * i / stepCount)));
+            steps.push(to);
+            return steps;
+        }
         // Estimasi biaya sekali jalan (one-way) untuk preview sebelum truk berangkat.
         function estimasiBiayaRute(kmEfektif, speedKmh, truck, routeKey) {
             const rm = ROUTE_MODE[routeKey] || ROUTE_MODE.tol;
@@ -427,11 +441,27 @@
                 real = raw.every(l => l.real);
                 kmEfektif = raw.reduce((s, l) => s + l.km, 0);
                 jamTempuh = raw.reduce((s, l) => s + l.jam, 0);
-                speedKmh = jamTempuh > 0 ? kmEfektif / jamTempuh : raw[1].spd;
+                // "rata-rata" yang ditampilkan sekarang diambil langsung dari 2 angka yang sudah muncul di
+                // atas (speed jalan biasa & speed tol, lihat karakterJalan "55 > 100" di bawah) - dirata-rata
+                // sederhana, BUKAN dihitung ulang dari total-jarak/total-waktu (jamTempuh tetap dihitung dari
+                // situ untuk estimasi waktu tempuh & biaya, cuma angka speed yang DITAMPILKAN saja yang beda
+                // sumbernya, supaya konsisten & gampang dicek pemain dengan 2 angka yang mereka lihat).
+                speedKmh = (raw[0].spd + raw[1].spd) / 2;
                 sinuosity = raw[1].km > 0 ? raw[1].km / (raw[1].straight || raw[1].km) : 1;
                 biayaBbm = Math.round((kmEfektif / kmPerLiterTruk(truck)) * HARGA_SOLAR_TRUK);
                 biayaTol = Math.round(raw[1].km * tarifTolPerKm(truck));
-                karakterJalan = !real ? 'rute perkiraan' : `jalan biasa &rarr; tol (±${Math.round(raw[1].km)} km) &rarr; jalan biasa`;
+                // Selalu tampilkan speed NAIK/TURUN BERTAHAP (mis. 55 > 60 > 70 > 80 > 90 > 80 > ... > 55),
+                // baik saat rute OSRM asli berhasil dimuat MAUPUN saat gagal (fallback "rute perkiraan") -
+                // sebelumnya begitu OSRM gagal, keterangan 3 ruas ini langsung diganti jadi teks generik
+                // 'rute perkiraan' padahal kecepatan tiap ruas (55/90/55 km/j dst, lihat roadSpeedKmh) TETAP
+                // dihitung berbeda per ruas di balik layar - cuma tidak pernah ditunjukkan ke pemain, jadi
+                // Rute Tol & Non-Tol terlihat sama saja di keterangan. Ramp naik dipasang saat masuk tol
+                // (akselerasi), ramp turun dipasang saat keluar tol lagi ke jalan biasa (deselerasi) - nilai
+                // tengah (puncak) tidak diulang dua kali antara ramp naik & turun.
+                // Cukup tampilkan speed AWAL (jalan biasa masuk gerbang) -> PUNCAK (di ruas tol), tanpa
+                // tahapan tengah, supaya keterangan tidak kepanjangan - mis. "55 > 100 km/j".
+                const rampTxt = `${Math.round(raw[0].spd)} &gt; ${Math.round(raw[1].spd)}`;
+                karakterJalan = `${rampTxt} km/j${real ? '' : ' &middot; rute perkiraan'}`;
             } else {
                 const { pts, real: realDirect } = await fetchRoute(origin, spbu, routeKey);
                 if (mySeq !== routeEstimateSeq) return; // sudah ada permintaan estimasi lain yang lebih baru, buang hasil ini
@@ -742,12 +772,19 @@
             return ok.reduce((best, k) => (!best || distKm(k, spbu) < distKm(best, spbu)) ? k : best, null);
         }
 
-        // Cadangan bila layanan rute tidak terjangkau: jalur berkelok perkiraan (bukan garis lurus)
+        // Cadangan bila layanan rute tidak terjangkau: jalur berkelok perkiraan (bukan garis lurus).
+        // CATATAN PERBAIKAN: amplitudo lama (0.07 x jarak, DITUMPUK dua gelombang sinus yang bisa saling
+        // menguatkan sampai 1.5x) bikin truk kelihatan melenceng puluhan km dari garis lurus asal->tujuan
+        // untuk perjalanan jauh - kadang sampai kelihatan "nyasar" ke arah laut/pantai di peta, padahal ini
+        // cuma perkiraan kosmetik saat OSRM gagal dijawab (berlaku sama untuk Rute Tol MAUPUN Non-Tol, karena
+        // keduanya lewat fungsi ini). Sekarang amplitudo jauh lebih kecil (maks &plusmn;3% dari jarak lurus,
+        // dan TIDAK ditumpuk lagi - cukup satu gelombang) supaya kelokannya tetap wajar & jalurnya tetap dekat
+        // garis lurus asal-tujuan, mirip jalan sungguhan.
         function windingPath(o, d) {
             const n = 90, dx = d.lon - o.lon, dy = d.lat - o.lat, len = Math.hypot(dx, dy) || 1e-4;
-            const px = -dy / len, py = dx / len, amp = len * 0.07, ph = Math.random() * 6, out = [];
+            const px = -dy / len, py = dx / len, amp = len * 0.03, ph = Math.random() * 6, out = [];
             for (let i = 0; i <= n; i++) {
-                const t = i / n, off = Math.sin(t * Math.PI) * amp * (Math.sin(t * 14 + ph) + 0.5 * Math.sin(t * 31 + ph * 2));
+                const t = i / n, off = Math.sin(t * Math.PI) * amp * Math.sin(t * 10 + ph);
                 out.push([o.lat + dy * t + py * off, o.lon + dx * t + px * off]);
             }
             return out;
