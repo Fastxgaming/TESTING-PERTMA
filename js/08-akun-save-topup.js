@@ -84,11 +84,14 @@
             // status "sudah dilihat" ikut akun, bukan ikut perangkat/browser.
             Object.assign(acc, { email: user.email, company: prof.company, code: prof.code || acc.code || '', owner: prof.owner, lastBroadcastSeen: prof.lastBroadcastSeen || 0 });
             store.set('pml_accounts', accs);
-            try {
-                const cloud = await fb.loadSave(user.uid), key = 'pml_save_' + user.uid, local = store.get(key, null);
-                cloudTs = cloud ? (cloud.ts || 0) : 0; store.set('pml_cloudts_' + user.uid, cloudTs);
-                if (cloud && (!local || (local.ts || 0) < cloud.ts)) store.set(key, JSON.parse(cloud.data));
-            } catch (e) { cloudTs = store.get('pml_cloudts_' + user.uid, 0); console.warn('Muat cloud gagal, pakai data lokal:', e); }
+            // SENGAJA TIDAK auto-terapkan save cloud ke perangkat ini saat login. Tiap perangkat jalan
+            // dengan save LOKALnya sendiri-sendiri (kosong/fresh kalau memang belum pernah main di perangkat
+            // ini) - cloud cuma dipakai kalau pemain sendiri menekan "Save Cloud" (mengunggah) atau "Muat dari
+            // Cloud" (menarik & menimpa lokal). Login di HP lain = progres berbeda dari laptop, sampai pemain
+            // sendiri yang memilih menyamakannya lewat salah satu tombol itu.
+            // Tetap ambil timestamp cloud (bukan isinya) sekadar untuk info "Terakhir disimpan" di UI.
+            try { const cloud = await fb.loadSave(user.uid); cloudTs = cloud ? (cloud.ts || 0) : 0; store.set('pml_cloudts_' + user.uid, cloudTs); }
+            catch (e) { cloudTs = store.get('pml_cloudts_' + user.uid, 0); console.warn('Cek status cloud gagal:', e); }
             startSession(acc, !!isNew);
         };
 
@@ -298,6 +301,39 @@
                 await new Promise(r => setTimeout(r, 2000));
             } finally {
                 cloudBusy = false; btn.disabled = false; setUi('fa-cloud-arrow-up', 'Save Cloud', 0);
+            }
+        }
+
+        // Tarik-paksa progres dari cloud ke perangkat ini - jaring pengaman untuk kasus save lokal di
+        // perangkat ini (mis. HP) kebetulan lebih baru dari cloud (pernah dimainkan offline sebelum login),
+        // sehingga logika otomatis di fbSession() TIDAK menimpanya (cloud cuma menang otomatis kalau lebih
+        // baru). Tombol ini mengizinkan pemain memilih sendiri "pakai versi cloud" walau berisiko menimpa
+        // progres yang belum sempat disinkron dari perangkat ini.
+        async function manualCloudLoad() {
+            if (!currentAccount || cloudBusy) return;
+            if (!window.fb) return addLog('CLOUD: Firebase belum siap. Periksa koneksi lalu muat ulang halaman.', 'warning');
+            const ok = await showConfirm(
+                'Ini akan MENIMPA progres yang sedang berjalan di perangkat ini sekarang dengan versi yang tersimpan di cloud. Progres di perangkat ini yang belum sempat di-"Save Cloud" akan hilang. Lanjutkan?',
+                { title: 'Muat dari Cloud', iconClass: 'fa-cloud-arrow-down', theme: 'blue', okLabel: 'Muat dari Cloud' }
+            );
+            if (!ok) return;
+            const uid = currentAccount.id;
+            cloudBusy = true;
+            try {
+                const cloud = await fb.loadSave(uid);
+                if (!cloud) { addLog('CLOUD: Belum ada progres tersimpan di cloud untuk akun ini.', 'warning'); return; }
+                const sv = JSON.parse(cloud.data);
+                store.set('pml_save_' + uid, sv);
+                cloudTs = cloud.ts || 0; store.set('pml_cloudts_' + uid, cloudTs);
+                applySave(sv);
+                updateCashDisplay(); renderCloudStatus();
+                addLog('CLOUD: Progres berhasil dimuat dari cloud.', 'success');
+                notify('Progres berhasil dimuat dari cloud.', 'success');
+            } catch (e) {
+                console.warn('Muat cloud gagal:', e);
+                addLog('CLOUD: Gagal memuat dari cloud (' + (e.code || e.message || 'error') + ').', 'warning');
+            } finally {
+                cloudBusy = false;
             }
         }
 

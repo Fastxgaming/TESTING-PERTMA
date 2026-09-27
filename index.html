@@ -238,6 +238,9 @@
                     <span class="relative"><i id="cloud-ico" class="fa-solid fa-cloud-arrow-up mr-1"></i><span id="cloud-label">Save Cloud</span></span>
                 </button>
                 <div class="leading-tight text-[10px] hidden sm:block"><div class="text-gray-500">Terakhir disimpan</div><div id="cloud-last" class="text-gray-300 font-mono">Belum pernah</div></div>
+                <button id="btn-cloud-load" onclick="manualCloudLoad()" class="shrink-0 bg-gray-950/70 hover:bg-gray-900 text-sky-400 hover:text-sky-300 font-semibold w-7 h-7 flex items-center justify-center rounded-full text-xs transition border border-gray-800" title="Muat progres dari cloud (menimpa progres di perangkat ini)">
+                    <i class="fa-solid fa-cloud-arrow-down"></i>
+                </button>
             </div>
             <button onclick="openAccountModal()" class="shrink-0 bg-gray-950/70 hover:bg-gray-900 text-gray-200 font-semibold px-3.5 py-1.5 rounded-full text-xs transition border border-gray-800" title="Profil, reset/hapus akun, atau keluar">
                 <i class="fa-solid fa-user-gear mr-1"></i> Akun

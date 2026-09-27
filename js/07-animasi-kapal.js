@@ -21,6 +21,24 @@
             `;
         }
 
+        // Fluktuasi kecepatan "hidup" untuk truk (kosmetik saja, TIDAK mengubah durasi/biaya perjalanan yang
+        // sudah dihitung & dikunci sejak dispatch) - dulu popup info truk cuma menampilkan satu angka speed
+        // tetap sepanjang perjalanan (mis. selalu "55 km/j"), padahal jalan lurus & lancar seharusnya kecepatan
+        // riil naik-turun sedikit (56/57/58...80), bukan diam di satu angka. Dibungkus gelombang sinus 2
+        // frekuensi (bukan random murni) supaya perubahannya mulus, bukan lompat-lompat kasar tiap frame.
+        function hashSeed(str) {
+            let h = 0;
+            for (let i = 0; i < String(str).length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+            return h;
+        }
+        function liveSpeedKmh(t, now) {
+            const range = SPEED_RANGE[t.e.segMode] || SPEED_RANGE[t.e.routeMode] || SPEED_RANGE.tol;
+            const base = t.e.baseSpeedKmh != null ? t.e.baseSpeedKmh : t.e.speedKmh;
+            const seed = hashSeed(t.e.id || 'truck');
+            const wobble = Math.sin(now / 2600 + seed) * 0.6 + Math.sin(now / 900 + seed * 1.7) * 0.4;
+            const amp = (range[1] - range[0]) * 0.18; // amplitudo proporsional lebar rentang mode-nya
+            return Math.max(range[0], Math.min(range[1], base + wobble * amp));
+        }
         function launchTruck(e, remote) {
             if (vNow() - e.startAt >= e.dur || flying.size > 80) return null;
             if (!remote && parkedMarkers.has(e.id)) { map.removeLayer(parkedMarkers.get(e.id)); parkedMarkers.delete(e.id); }
@@ -30,7 +48,7 @@
             const isKapal = e.vehicle === 'kapal';
             const isBoat = isFerry || isKapal;
             const color = isFerry ? '#0ea5e9' : isKapal ? '#06b6d4' : (remote ? '#38bdf8' : (TRUCK_COLOR[e.type] || '#3b82f6'));
-            const routeColor = '#f59e0b';
+            const routeColor = '#a855f7'; // ungu terang - dulu amber (#f59e0b), gampang menyatu dengan warna jalan nasional/arteri di tile peta
             const line = L.polyline(pts, { color: routeColor, weight: remote ? 2 : 3, opacity: isBoat ? 0.75 : 0.85, dashArray: isBoat ? '2 10' : '6 8' }).addTo(map);
             const trail = L.polyline([pts[0]], { color, weight: remote ? 3 : 4, opacity: 0.85 }).addTo(map);
             const marker = L.marker(pts[0], {
@@ -50,6 +68,7 @@
             const now = vNow();
             flying.forEach(t => {
                 const f = Math.min(1, (now - t.e.startAt) / t.e.dur);
+                if (t.e.vehicle === 'truck' && f < 1) t.e.speedKmh = liveSpeedKmh(t, now);
                 const { i, ll } = posAt(t.pts, t.cum, f * t.total);
                 t.marker.setLatLng(ll);
                 const tf = t.marker.getElement() && t.marker.getElement().querySelector('.tf');
@@ -107,19 +126,43 @@
                 t.done = () => resolve();
             });
         }
-        async function driveLeg(from, to, meta, fit) {
-            const { pts, real } = await fetchRoute(from, to, meta.routeMode);
+        // Satu ruas tunggal darat (dipakai baik untuk rute non-tol langsung, MAUPUN sebagai salah satu dari
+        // 3 potongan rute tol - lihat driveLeg). routeKeyForFetch menentukan gaya rute yang diminta ke OSRM
+        // ('tol' = boleh lewat motorway, 'nontol' = dipaksa exclude=motorway,toll) DAN rentang kecepatan yang
+        // dipakai (lihat roadSpeedKmh) - keduanya wajib konsisten satu sama lain per ruas.
+        async function driveSegment(from, to, meta, fit, routeKeyForFetch) {
+            const { pts, real } = await fetchRoute(from, to, routeKeyForFetch);
             const straightKm = distKm(from, to);
             const { total: rawTotal, sinuosity } = sinuosityOf(pts, straightKm);
-            // Kecepatan mengikuti karakter jalan sesungguhnya & mode rute (lihat roadSpeedKmh):
-            // Rute Tol 80-100 km/j, Rute Non-Tol 55-80 km/j, makin berkelok jalurnya makin pelan.
-            const speedKmh = roadSpeedKmh(sinuosity, real, meta.routeMode);
-            // Rute Non-Tol lewat jalan nasional/arteri: jarak tempuh riil lebih jauh dari rute Tol.
-            const rm = ROUTE_MODE[meta.routeMode] || ROUTE_MODE.tol;
+            const speedKmh = roadSpeedKmh(sinuosity, real, routeKeyForFetch);
+            const rm = ROUTE_MODE[routeKeyForFetch] || ROUTE_MODE.tol;
             const total = rawTotal * rm.distFactor;
             const dur = (total / speedKmh) * (3600000 / GAME_SPEED);
-            await runVehicleLeg(pts, dur, { ...meta, vehicle: 'truck', speedKmh }, fit);
+            await runVehicleLeg(pts, dur, { ...meta, vehicle: 'truck', speedKmh, baseSpeedKmh: speedKmh, segMode: routeKeyForFetch }, fit);
             return { km: total, dur, real, speedKmh, sinuosity };
+        }
+        async function driveLeg(from, to, meta, fit) {
+            const rm = ROUTE_MODE[meta.routeMode] || ROUTE_MODE.tol;
+            if (rm.key === 'tol') {
+                // Coba pecah jadi 3 ruas nyata: jalan biasa ke gerbang masuk -> jalan tol -> jalan biasa dari
+                // gerbang keluar ke tujuan. Ini meniru cara truk sungguhan lewat tol (tidak start/selesai persis
+                // di badan jalan tol) - sebelumnya seluruh rute "Tol" cuma satu request OSRM polos dari asal
+                // langsung ke tujuan, jadi terasa aneh kalau asal/tujuannya sendiri jauh dari jalan tol.
+                const gates = pickTollGates(from, to);
+                if (gates) {
+                    const l1 = await driveSegment(from, gates.entryPoint, meta, fit, 'nontol');
+                    addLog(`${meta.id} tiba di ${gates.entryPoint.nama}, masuk jalan tol...`, 'info', 'truck');
+                    const l2 = await driveSegment(gates.entryPoint, gates.exitPoint, meta, false, 'tol');
+                    addLog(`${meta.id} keluar di ${gates.exitPoint.nama}, lanjut jalan biasa menuju tujuan...`, 'info', 'truck');
+                    const l3 = await driveSegment(gates.exitPoint, to, meta, false, 'nontol');
+                    const km = l1.km + l2.km + l3.km, dur = l1.dur + l2.dur + l3.dur;
+                    const jamAsli = (dur * GAME_SPEED) / 3600000;
+                    return { km, dur, real: l1.real && l2.real && l3.real, speedKmh: jamAsli > 0 ? km / jamAsli : l2.speedKmh, sinuosity: l2.sinuosity };
+                }
+            }
+            // Non-tol, atau Tol diminta tapi tidak ada kombinasi gerbang yang masuk akal (fallback aman) -
+            // satu ruas langsung seperti sebelumnya.
+            return await driveSegment(from, to, meta, fit, meta.routeMode);
         }
         async function ferryLeg(from, to, meta, fit) {
             const pts = [[from.lat, from.lon], [to.lat, to.lon]];

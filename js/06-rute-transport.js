@@ -17,7 +17,11 @@
         function formatNomorSuratJalan(urut, mode = 'BBM') {
             const romawi = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
             const now = new Date(gameNow());
-            return `SJ/${mode}-NUSA/${String(urut).padStart(3, '0')}/${romawi[now.getMonth()]}/${now.getFullYear()}`;
+            // Pakai kode perusahaan pemain sendiri (diisi saat daftar akun, lihat companyCodes/{code}) -
+            // sebelumnya di sini hardcode teks 'NUSA' untuk SEMUA pemain, jadi Surat Jalan tidak pernah
+            // benar-benar menampilkan kode perusahaan masing-masing pemain.
+            const kodePerusahaan = (currentAccount && currentAccount.code) || 'NUSA';
+            return `SJ/${mode}-${kodePerusahaan}/${String(urut).padStart(3, '0')}/${romawi[now.getMonth()]}/${now.getFullYear()}`;
         }
 
         // Nomor final (mengunci counter) - dipakai saat Surat Jalan benar-benar dikonfirmasi
@@ -312,6 +316,9 @@
         //    lebih tinggi dari jalan biasa.
         //  - Rute Non-Tol (jalan nasional/arteri, lewat kota/kampung): 55-80 km/j, makin berkelok jalurnya
         //    (banyak tikungan/persimpangan) makin pelan.
+        // Rentang kecepatan resmi per mode rute (dipakai roadSpeedKmh() DAN untuk clamp fluktuasi kecepatan
+        // "hidup" yang ditampilkan real-time di popup info truk - lihat liveSpeedKmh() di 07-animasi-kapal.js).
+        const SPEED_RANGE = { tol: [80, 100], nontol: [55, 80] };
         function roadSpeedKmh(sinuosity, real, routeKey) {
             const rm = ROUTE_MODE[routeKey] || ROUTE_MODE.tol;
             if (rm.key === 'tol') {
@@ -321,7 +328,7 @@
                 else if (sinuosity >= 1.08) speed = 88;
                 else if (sinuosity >= 1.03) speed = 95;
                 else speed = 100;                             // lurus & renggang, khas ruas tol utama
-                return Math.max(80, Math.min(100, speed));
+                return Math.max(SPEED_RANGE.tol[0], Math.min(SPEED_RANGE.tol[1], speed));
             }
             let speed;
             if (!real) speed = 55; // rute perkiraan (OSRM gagal dimuat) sengaja dibuat berkelok, anggap jalan kecil
@@ -330,7 +337,7 @@
             else if (sinuosity >= 1.12) speed = 68;      // sedikit berkelok
             else if (sinuosity >= 1.05) speed = 74;      // relatif lurus
             else speed = 80;                              // nyaris lurus & renggang, jarang ada belokan
-            return Math.max(55, Math.min(80, speed));
+            return Math.max(SPEED_RANGE.nontol[0], Math.min(SPEED_RANGE.nontol[1], speed));
         }
         // Estimasi biaya sekali jalan (one-way) untuk preview sebelum truk berangkat.
         function estimasiBiayaRute(kmEfektif, speedKmh, truck, routeKey) {
@@ -391,25 +398,63 @@
             const mySeq = ++routeEstimateSeq;
             box.innerHTML = '<span class="text-gray-500">Menghitung rute...</span>';
             const straightKm = distKm(origin, spbu);
-            const { pts, real } = await fetchRoute(origin, spbu, routeKey);
-            if (mySeq !== routeEstimateSeq) return; // sudah ada permintaan estimasi lain yang lebih baru, buang hasil ini
 
-            const { total, sinuosity } = sinuosityOf(pts, straightKm);
-            const speedKmh = roadSpeedKmh(sinuosity, real, routeKey);
-            const rmDef = ROUTE_MODE[routeKey] || ROUTE_MODE.tol;
-            const kmEfektif = total * rmDef.distFactor;
-            const est = estimasiBiayaRute(kmEfektif, speedKmh, truck, routeKey);
+            // Kalau Rute Tol dipilih & ada kombinasi gerbang masuk/keluar yang masuk akal (lihat pickTollGates),
+            // preview dipecah jadi 3 ruas SAMA PERSIS seperti yang dijalankan animasi truk (driveLeg di
+            // 07-animasi-kapal.js): jalan biasa -> tol -> jalan biasa. Biaya tol dihitung HANYA dari km ruas
+            // tengah (yang benar-benar di jalan tol), bukan dari seluruh jarak - sebelumnya seluruh jarak
+            // dikenakan tarif tol walau sebagian besarnya sebenarnya cuma jalan akses biasa menuju gerbang.
+            const gates = routeKey === 'tol' ? pickTollGates(origin, spbu) : null;
+            let real, kmEfektif, speedKmh, sinuosity, biayaBbm, biayaTol, jamTempuh, karakterJalan, rmLabelUsed = ROUTE_MODE[routeKey] || ROUTE_MODE.tol;
+
+            if (gates) {
+                const [r1, r2, r3] = await Promise.all([
+                    fetchRoute(origin, gates.entryPoint, 'nontol'),
+                    fetchRoute(gates.entryPoint, gates.exitPoint, 'tol'),
+                    fetchRoute(gates.exitPoint, spbu, 'nontol')
+                ]);
+                if (mySeq !== routeEstimateSeq) return;
+                const raw = [
+                    { r: r1, key: 'nontol', straight: distKm(origin, gates.entryPoint) },
+                    { r: r2, key: 'tol', straight: distKm(gates.entryPoint, gates.exitPoint) },
+                    { r: r3, key: 'nontol', straight: distKm(gates.exitPoint, spbu) }
+                ].map(l => {
+                    const s = sinuosityOf(l.r.pts, l.straight);
+                    const spd = roadSpeedKmh(s.sinuosity, l.r.real, l.key);
+                    const km = s.total * (ROUTE_MODE[l.key] || ROUTE_MODE.tol).distFactor;
+                    return { km, spd, real: l.r.real, key: l.key, jam: km / spd };
+                });
+                real = raw.every(l => l.real);
+                kmEfektif = raw.reduce((s, l) => s + l.km, 0);
+                jamTempuh = raw.reduce((s, l) => s + l.jam, 0);
+                speedKmh = jamTempuh > 0 ? kmEfektif / jamTempuh : raw[1].spd;
+                sinuosity = raw[1].km > 0 ? raw[1].km / (raw[1].straight || raw[1].km) : 1;
+                biayaBbm = Math.round((kmEfektif / kmPerLiterTruk(truck)) * HARGA_SOLAR_TRUK);
+                biayaTol = Math.round(raw[1].km * tarifTolPerKm(truck));
+                karakterJalan = !real ? 'rute perkiraan' : `jalan biasa &rarr; tol (±${Math.round(raw[1].km)} km) &rarr; jalan biasa`;
+            } else {
+                const { pts, real: realDirect } = await fetchRoute(origin, spbu, routeKey);
+                if (mySeq !== routeEstimateSeq) return; // sudah ada permintaan estimasi lain yang lebih baru, buang hasil ini
+                const s = sinuosityOf(pts, straightKm);
+                sinuosity = s.sinuosity; real = realDirect;
+                speedKmh = roadSpeedKmh(sinuosity, real, routeKey);
+                const rmDef = ROUTE_MODE[routeKey] || ROUTE_MODE.tol;
+                kmEfektif = s.total * rmDef.distFactor;
+                const est = estimasiBiayaRute(kmEfektif, speedKmh, truck, routeKey);
+                biayaBbm = est.biayaBbm; biayaTol = est.biayaTol; jamTempuh = est.jamTempuh;
+                karakterJalan = !real ? 'rute perkiraan' : sinuosity >= 1.22 ? 'jalan berkelok-kelok' : sinuosity >= 1.12 ? 'sedikit berkelok' : 'jalan renggang & lurus';
+            }
+
             const gol = golonganTolTruk(truck);
-            const totalPP = (est.biayaBbm + est.biayaTol) * 2;
-            const karakterJalan = !real ? 'rute perkiraan' : sinuosity >= 1.22 ? 'jalan berkelok-kelok' : sinuosity >= 1.12 ? 'sedikit berkelok' : 'jalan renggang & lurus';
+            const totalPP = (biayaBbm + biayaTol) * 2;
 
             box.innerHTML = `
                 <div class="flex justify-between"><span>Asal &rarr; Tujuan</span><span class="text-gray-300 font-semibold">${esc(origin.nama)} &rarr; ${esc(spbu.nama)}</span></div>
-                <div class="flex justify-between"><span>Estimasi Jarak (1 arah)</span><span class="text-gray-300 font-mono">&plusmn;${Math.round(est.kmEfektif)} km &middot; ${est.rm.label}</span></div>
-                <div class="flex justify-between"><span>Kondisi Jalan &amp; Kecepatan</span><span class="text-gray-300 font-mono">${karakterJalan} &middot; ${Math.round(speedKmh)} km/j</span></div>
-                <div class="flex justify-between"><span>Estimasi Waktu Tempuh</span><span class="text-gray-300 font-mono">${fmtJam(est.jamTempuh)}</span></div>
-                <div class="flex justify-between"><span>Biaya BBM Solar (PP)</span><span class="text-red-400 font-mono">${formatRupiah(est.biayaBbm * 2)}</span></div>
-                <div class="flex justify-between"><span>Biaya Tol Gol. ${gol.gol} (PP)</span><span class="text-red-400 font-mono">${est.biayaTol > 0 ? formatRupiah(est.biayaTol * 2) : 'Rp0 (bebas tol)'}</span></div>
+                <div class="flex justify-between"><span>Estimasi Jarak (1 arah)</span><span class="text-gray-300 font-mono">&plusmn;${Math.round(kmEfektif)} km &middot; ${rmLabelUsed.label}</span></div>
+                <div class="flex justify-between"><span>Kondisi Jalan &amp; Kecepatan</span><span class="text-gray-300 font-mono">${karakterJalan} &middot; rata-rata ${Math.round(speedKmh)} km/j</span></div>
+                <div class="flex justify-between"><span>Estimasi Waktu Tempuh</span><span class="text-gray-300 font-mono">${fmtJam(jamTempuh)}</span></div>
+                <div class="flex justify-between"><span>Biaya BBM Solar (PP)</span><span class="text-red-400 font-mono">${formatRupiah(biayaBbm * 2)}</span></div>
+                <div class="flex justify-between"><span>Biaya Tol Gol. ${gol.gol} (PP)</span><span class="text-red-400 font-mono">${biayaTol > 0 ? formatRupiah(biayaTol * 2) : 'Rp0 (bebas tol)'}</span></div>
                 <div class="flex justify-between border-t border-gray-800 mt-1 pt-1"><span class="font-bold text-gray-300">Total Estimasi Operasional (PP)</span><span class="font-bold text-gray-100 font-mono">${formatRupiah(totalPP)}</span></div>`;
         }
 
@@ -487,11 +532,15 @@
                     [-7.2200, 112.6600], [-7.1500, 112.6300], [-6.8800, 112.1000] // 25-27: Driyorejo-Gresik/Manyar-spur arah Lamongan/Tuban (Tol KLBM & perpanjangannya)
                 ],
                 edges: [[0,1],[1,2],[2,3],[2,4],[4,5],[5,6],[6,7],[7,8],[8,9],[9,10],[10,11],[11,12],[12,13],[13,14],[14,15],[15,16],[16,17],[17,18],
-                    [18,19],[18,20],[20,21],[21,22],[22,23],[23,24],[18,25],[25,26],[26,27]]
+                    [18,19],[18,20],[20,21],[21,22],[22,23],[23,24],[18,25],[25,26],[26,27]],
+                // Nama gerbang per node (cuma untuk label log perjalanan, mengikuti urutan komentar di atas)
+                names: ['Merak','Jakarta','Cikampek','Cileunyi','Cirebon','Brebes','Tegal','Pekalongan','Kendal','Semarang',
+                    'Salatiga','Sragen','Ngawi','Madiun','Nganjuk','Kertosono','Jombang','Mojokerto','Krian','Surabaya',
+                    'Sidoarjo','Gempol','Pandaan','Pasuruan','Probolinggo','Driyorejo','Gresik/Manyar','Lamongan/Tuban']
             },
-            Bali: { nodes: [[-8.7480, 115.1670], [-8.7490, 115.2130], [-8.7960, 115.2220]], edges: [[0,1],[1,2]] }, // Tol Bali Mandara: Ngurah Rai-Benoa-Nusa Dua
-            Kalimantan: { nodes: [[-1.2379, 116.8529], [-0.8500, 117.0000], [-0.5022, 117.1536]], edges: [[0,1],[1,2]] }, // Tol Balikpapan-Samarinda
-            Sulawesi: { nodes: [[-5.1477, 119.4327], [-5.0500, 119.5000], [-4.9887, 119.5713]], edges: [[0,1],[1,2]] } // Tol Makassar-Maros (Seksi 1-4)
+            Bali: { nodes: [[-8.7480, 115.1670], [-8.7490, 115.2130], [-8.7960, 115.2220]], edges: [[0,1],[1,2]], names: ['Ngurah Rai','Benoa','Nusa Dua'] }, // Tol Bali Mandara: Ngurah Rai-Benoa-Nusa Dua
+            Kalimantan: { nodes: [[-1.2379, 116.8529], [-0.8500, 117.0000], [-0.5022, 117.1536]], edges: [[0,1],[1,2]], names: ['Balikpapan','KM 13','Samarinda'] }, // Tol Balikpapan-Samarinda
+            Sulawesi: { nodes: [[-5.1477, 119.4327], [-5.0500, 119.5000], [-4.9887, 119.5713]], edges: [[0,1],[1,2]], names: ['Makassar','KM 15','Maros'] } // Tol Makassar-Maros (Seksi 1-4)
         };
         // Jarak wajar naik/turun tol lewat jalan biasa (akses ke gerbang) tetap dianggap masuk akal sampai batas ini -
         // dilonggarkan supaya kasus seperti Tuban->Banyuwangi (masuk tol di Gresik, keluar jauh di Probolinggo,
@@ -564,6 +613,36 @@
                 });
             });
             return best;
+        }
+        // Pilih KOMBINASI gerbang masuk & keluar tol terbaik antara dua titik (satu pulau) sekaligus
+        // mengembalikan KOORDINAT gerbangnya - dipakai untuk benar-benar memecah rute jadi 3 ruas nyata:
+        // jalan biasa (asal -> gerbang masuk) -> jalan tol (gerbang masuk -> gerbang keluar) -> jalan biasa
+        // (gerbang keluar -> tujuan), meniru cara kerja tol sungguhan. Null kalau tidak ada kombinasi gerbang
+        // yang masuk akal (sama seperti syarat di segmentTollAvailable) - pemanggil harus fallback ke rute
+        // langsung non-tol/tol biasa.
+        function pickTollGates(a, b) {
+            if (!a || !b || a.lat == null || b.lat == null) return null;
+            const net = TOLL_NETWORK[islandOf(a)];
+            if (!net) return null;
+            const entries = candidateTollNodes(a, net, TOLL_ACCESS_CAP_KM);
+            const exits = candidateTollNodes(b, net, TOLL_ACCESS_CAP_KM);
+            if (!entries.length || !exits.length) return null;
+            let best = null;
+            entries.forEach(en => {
+                const distArr = tollNetworkDistAll(net, en.idx);
+                exits.forEach(ex => {
+                    if (en.idx === ex.idx) return; // gerbang masuk & keluar sama = tidak masuk akal masuk-keluar tol
+                    const total = en.dist + distArr[ex.idx] + ex.dist;
+                    if (!best || total < best.total) best = { total, entry: en, exit: ex };
+                });
+            });
+            if (!best || best.total > distKm(a, b) * TOLL_DETOUR_RATIO) return null;
+            const names = net.names || [];
+            const [elat, elon] = net.nodes[best.entry.idx], [xlat, xlon] = net.nodes[best.exit.idx];
+            return {
+                entryPoint: { lat: elat, lon: elon, nama: `Gerbang Tol ${names[best.entry.idx] || ''}`.trim() },
+                exitPoint: { lat: xlat, lon: xlon, nama: `Gerbang Tol ${names[best.exit.idx] || ''}`.trim() }
+            };
         }
         // Cek satu ruas perjalanan (asal & tujuan di PULAU YANG SAMA): apakah masuk akal lewat tol sebagian jalan.
         function segmentTollAvailable(a, b) {

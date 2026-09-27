@@ -199,8 +199,8 @@
             "total_spbu": 5,
             "list_spbu": [
               {"kode": "JT-632-01", "nama": "SPBU Mantingan (Jalan Raya Solo-Ngawi)", "lat": -7.362145, "lon": 111.161042, "tipe": "DODO"},
-              {"kode": "JT-632-22", "nama": "SPBU Rest Area KM 575 A Tol Solo-Ngawi", "lat": -7.421520, "lon": 111.354110, "tipe": "COCO"},
-              {"kode": "JT-632-23", "nama": "SPBU Rest Area KM 575 B Tol Solo-Ngawi", "lat": -7.421890, "lon": 111.354890, "tipe": "COCO"},
+              {"kode": "JT-632-22", "nama": "SPBU Rest Area KM 575 A Tol Solo-Ngawi", "lat": -7.429500, "lon": 111.309500, "tipe": "COCO"},
+              {"kode": "JT-632-23", "nama": "SPBU Rest Area KM 575 B Tol Solo-Ngawi", "lat": -7.429100, "lon": 111.310300, "tipe": "COCO"},
               {"kode": "JT-632-05", "nama": "SPBU Ngawi Kota / Ringroad Timur", "lat": -7.402100, "lon": 111.452100, "tipe": "DODO"},
               {"kode": "JT-632-09", "nama": "SPBU Geneng Ngawi", "lat": -7.489120, "lon": 111.441020, "tipe": "DODO"}
             ]
