@@ -339,7 +339,7 @@
                 addLog(`TOP UP: Saldo bertambah ${formatRupiah(t.cash)} (pembayaran ${rpFmt(t.price)}).`, 'success');
                 addLog('CLOUD: Saldo top up baru tersimpan lokal. Tekan "Save Cloud" supaya tidak hilang kalau ganti perangkat.', 'warning');
                 document.getElementById('btn-cloud-save')?.classList.add('cloud-remind');
-                showModal('Top Up Berhasil!', `Saldo perusahaan bertambah ${formatRupiah(t.cash)}.\n\nJangan lupa tekan "Save Cloud" di pojok atas supaya saldo ini aman tersimpan di cloud.`, 'fa-wallet', 'blue');
+                showModal('Top Up Berhasil!', `Saldo perusahaan bertambah ${formatRupiah(t.cash)}.\n\nJangan lupa buka menu "Akun" lalu tekan "Save Cloud" supaya saldo ini aman tersimpan di cloud.`, 'fa-wallet', 'blue');
             }
             // Saldo tersimpan lokal otomatis (saveGame di atas). Save cloud tetap manual lewat tombol "Save Cloud" -
             // di sini cukup tandai kiriman sebagai sudah diklaim supaya tidak muncul lagi di notifikasi.

@@ -203,6 +203,7 @@
             document.getElementById('acct-uid').innerText = currentAccount.id;
             document.getElementById('acct-email').innerText = currentAccount.email || '-';
             setAcctMode('reset');
+            renderCloudStatus();
             document.getElementById('account-modal').classList.remove('hidden');
         }
         function closeAccountModal() { document.getElementById('account-modal').classList.add('hidden'); }

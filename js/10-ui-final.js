@@ -201,8 +201,8 @@
                 </div>`; }).join('') : '';
         }
 
-        // ===== JAM GAME: 1 menit game = 3,5 detik nyata (1 jam game = 3,5 menit nyata, 1 hari game = 84 menit nyata, 1 minggu game = 9,8 jam nyata) =====
-        const GAME_START = new Date(2026, 8, 25, 6, 0, 0).getTime(), GAME_SPEED = 60 / 3.5, ORDER_DELAY = 180000; // GAME_SPEED=60/3.5 -> 1 menit in-game = 3,5 detik nyata
+        // ===== JAM GAME: 1 menit game = 2 detik nyata (1 jam game = 2 menit nyata, 1 hari game = 48 menit nyata, 1 minggu game = 5,6 jam nyata) =====
+        const GAME_START = new Date(2026, 8, 25, 6, 0, 0).getTime(), GAME_SPEED = 60 / 2, ORDER_DELAY = 180000; // GAME_SPEED=60/2 -> 1 menit in-game = 2 detik nyata. ORDER_DELAY = jeda awal sebelum pesanan pertama boleh muncul (3 menit nyata)
         let gameElapsed = 0;
         const gameNow = () => GAME_START + gameElapsed * GAME_SPEED;
         const fmtTime = ms => new Date(ms).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':');
@@ -242,12 +242,12 @@
         // id jenis BBM di FUELS (dipakai form dispatch) ke key tangki produk jadi di PRODUCT_META/kap.
         const FUEL_KAP_KEY = { solar: 'solar', pertalite: 'pertalite', dex: 'dexlite', turbo: 'pertamax_turbo' };
         let orders = [], ordHist = [], orderSeq = 1;
-        const ORDER_BATCH = { BBM: 5, LPG: 3 }, ORDER_TTL = 1470000; // batas maksimal pesanan TERBUKA bersamaan per jenis; TTL: 24,5 menit nyata = 7 jam game (1 menit in-game = 3,5 detik nyata, lihat GAME_SPEED)
+        const ORDER_BATCH = { BBM: 5, LPG: 3 }, ORDER_TTL = 1200000; // batas maksimal pesanan TERBUKA bersamaan per jenis; TTL: 20 menit nyata = 10 jam game (1 menit in-game = 2 detik nyata, lihat GAME_SPEED)
         // Pesanan baru muncul BERTAHAP satu per satu (bukan langsung penuh sekaligus begitu ada armada pertama),
         // supaya terasa natural. Jeda dasar antar kemunculan pesanan baru = ORDER_TRICKLE_HOURS jam waktu GAME,
         // dengan sedikit variasi acak (+-30%) biar tidak terasa seperti metronom. Terus jalan sampai jumlah
         // pesanan TERBUKA per jenis menyentuh batas ORDER_BATCH di atas.
-        const ORDER_TRICKLE_HOURS = 2;
+        const ORDER_TRICKLE_HOURS = 25 / 60; // jeda dasar antar pesanan baru = tepat 25 menit game (±1,5 menit nyata)
         let nextOrderGt = 0; // gameNow() paling cepat pesanan baru berikutnya boleh muncul
         // Stok SPBU cuma diturunkan setiap STOK_TICK_MINUTES menit waktu GAME (bukan tiap kali tickStock()
         // dipanggil oleh setInterval, yang jauh lebih sering) - ganti ke 3 kalau mau penurunannya lebih rapat.

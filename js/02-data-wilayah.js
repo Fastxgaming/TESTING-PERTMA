@@ -122,8 +122,18 @@
         function clearNotif() { notifs = []; notifUnread = 0; renderNotif(); }
         function toggleNotif() {
             const pn = document.getElementById('notif-panel'); pn.classList.toggle('hidden');
-            if (!pn.classList.contains('hidden')) { notifUnread = 0; renderNotif(); }
+            if (!pn.classList.contains('hidden')) { notifUnread = 0; renderNotif(); positionNotifPanel(); }
         }
+        // FIX BUG panel lonceng di HP: hitung ulang posisi top panel = tepat di bawah header
+        // (bukan cuma di bawah ikon), supaya tidak menimpa/kepotong saat header pecah 2 baris.
+        function positionNotifPanel() {
+            const header = document.querySelector('header');
+            if (header) document.documentElement.style.setProperty('--notif-panel-top', (header.getBoundingClientRect().bottom + 6) + 'px');
+        }
+        window.addEventListener('resize', () => {
+            const pn = document.getElementById('notif-panel');
+            if (pn && !pn.classList.contains('hidden')) positionNotifPanel();
+        });
         document.addEventListener('click', e => { if (!e.target.closest('#notif-wrap')) document.getElementById('notif-panel').classList.add('hidden'); });
         function renderNotif() {
             const n = pendingTopups.length + notifUnread, bd = document.getElementById('notif-badge');

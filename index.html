@@ -233,16 +233,6 @@
             <button onclick="switchTab('tab-leaderboard')" id="btn-tab-leaderboard" class="shrink-0 bg-gradient-to-b from-yellow-400 to-yellow-600 hover:from-yellow-300 hover:to-yellow-500 text-gray-950 font-bold px-3.5 py-1.5 rounded-full text-xs transition shadow flex items-center" title="Lihat peringkat perusahaan">
                 <i class="fa-solid fa-trophy mr-1"></i><span class="btn-label">Peringkat</span>
             </button>
-            <div class="shrink-0 flex items-center gap-2 bg-gray-950/70 px-2 py-1 rounded-full border border-gray-800 shadow-inner">
-                <button id="btn-cloud-save" onclick="manualCloudSave()" class="relative overflow-hidden bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 disabled:hover:from-sky-500 disabled:hover:to-blue-600 disabled:cursor-not-allowed text-white font-semibold px-3.5 py-1.5 rounded-full text-xs transition shadow" title="Simpan progres game ke cloud (proses 15 detik)">
-                    <span id="cloud-bar" class="absolute inset-y-0 left-0 bg-sky-300/40" style="width:0;transition:width .3s linear"></span>
-                    <span class="relative"><i id="cloud-ico" class="fa-solid fa-cloud-arrow-up mr-1"></i><span id="cloud-label" class="btn-label">Save Cloud</span></span>
-                </button>
-                <div class="leading-tight text-[10px] hidden sm:block"><div class="text-gray-500">Terakhir disimpan</div><div id="cloud-last" class="text-gray-300 font-mono">Belum pernah</div></div>
-                <button id="btn-cloud-load" onclick="manualCloudLoad()" class="shrink-0 bg-gray-950/70 hover:bg-gray-900 text-sky-400 hover:text-sky-300 font-semibold w-7 h-7 flex items-center justify-center rounded-full text-xs transition border border-gray-800" title="Muat progres dari cloud (menimpa progres di perangkat ini)">
-                    <i class="fa-solid fa-cloud-arrow-down"></i>
-                </button>
-            </div>
             <button onclick="openAccountModal()" class="shrink-0 bg-gray-950/70 hover:bg-gray-900 text-gray-200 font-semibold px-3.5 py-1.5 rounded-full text-xs transition border border-gray-800" title="Profil, reset/hapus akun, atau keluar">
                 <i class="fa-solid fa-user-gear mr-1"></i><span class="btn-label"> Akun</span>
             </button>
@@ -467,6 +457,21 @@
                     <button onclick="copyAcctUid()" class="shrink-0 w-7 h-7 rounded-lg bg-gray-900 border border-gray-800 hover:border-teal-500/40 flex items-center justify-center text-gray-400 hover:text-teal-300 transition" title="Salin UID"><i class="fa-regular fa-copy"></i></button>
                 </div>
             </div>
+            <div class="relative bg-gray-950/70 border border-gray-800 rounded-xl p-3 mb-3">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-gray-500 text-[9px] uppercase tracking-wide">Progres Game</span>
+                    <span class="text-[10px] text-gray-500">Terakhir: <span id="cloud-last" class="text-gray-300 font-mono">Belum pernah</span></span>
+                </div>
+                <div class="space-y-1.5">
+                    <button id="btn-cloud-save" onclick="manualCloudSave()" class="relative overflow-hidden w-full bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 disabled:hover:from-sky-500 disabled:hover:to-blue-600 disabled:cursor-not-allowed text-white font-semibold py-2 rounded-xl text-[11px] transition shadow" title="Simpan progres game ke cloud (proses 15 detik)">
+                        <span id="cloud-bar" class="absolute inset-y-0 left-0 bg-sky-300/40" style="width:0;transition:width .3s linear"></span>
+                        <span class="relative"><i id="cloud-ico" class="fa-solid fa-cloud-arrow-up mr-1.5"></i><span id="cloud-label">Save Cloud</span></span>
+                    </button>
+                    <button id="btn-cloud-load" onclick="manualCloudLoad()" class="w-full bg-gray-900 hover:bg-gray-800 text-sky-400 hover:text-sky-300 font-semibold py-2 rounded-xl text-[11px] transition border border-gray-800" title="Muat progres dari cloud (menimpa progres di perangkat ini)">
+                        <i class="fa-solid fa-cloud-arrow-down mr-1.5"></i>Muat Progres
+                    </button>
+                </div>
+            </div>
             <div class="relative grid grid-cols-2 gap-1 bg-gray-950/70 border border-gray-800 p-1 rounded-xl mb-3">
                 <button id="acct-tab-reset" onclick="setAcctMode('reset')" class="py-2 rounded-lg font-bold text-[11px] transition">Reset Akun</button>
                 <button id="acct-tab-delete" onclick="setAcctMode('delete')" class="py-2 rounded-lg font-bold text-[11px] transition">Hapus Akun</button>
@@ -517,11 +522,15 @@
                     <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-bell text-[11px] text-red-400"></i></span>
                     <span>Pesanan SPBU</span><span id="ord-badge" class="hidden ml-auto bg-red-600 text-white text-[9px] font-black rounded-full px-1.5 py-0.5">0</span>
                 </button>
-                <button onclick="switchTab('tab-delivery')" class="tab-btn shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold flex items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-delivery">
+                <!-- POM BBM & LPG (dispatch ke SPBU) dilepas dari nav - sekarang diakses langsung lewat tombol
+                     "Kirim" di tiap kartu pesanan (tab Pesanan SPBU -> kirimPesanan()), jadi tidak ada 2 pintu
+                     masuk yang fungsinya sama. Tombol tetap ada di DOM (hidden) karena switchTab() masih
+                     butuh elemen btn-tab-delivery/btn-tab-lpg untuk ambil ikon & label saat dipanggil dari kirimPesanan(). -->
+                <button onclick="switchTab('tab-delivery')" class="tab-btn hidden shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-delivery">
                     <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-gas-pump text-[11px] text-emerald-400"></i></span>
                     <span>POM BBM</span>
                 </button>
-                <button onclick="switchTab('tab-lpg')" class="tab-btn shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold flex items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-lpg">
+                <button onclick="switchTab('tab-lpg')" class="tab-btn hidden shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-lpg">
                     <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-fire-flame-simple text-[11px] text-amber-500"></i></span>
                     <span>LPG</span>
                 </button>
@@ -541,9 +550,21 @@
                     <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-store text-[11px] text-indigo-400"></i></span>
                     <span>Dealer</span>
                 </button>
-                <button onclick="switchTab('tab-kapal')" class="tab-btn shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold flex items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-kapal">
+                <!-- Kapal generik dilepas jadi 2 pintu masuk terpisah & jelas: Kirim BBL (ke Kilang/Depo Cabang BBM)
+                     dan LPG Curah (ke Depo Cabang LPG). Keduanya tetap satu tab-content (tab-kapal) di baliknya -
+                     lihat openTransferKapal() yang mengatur filter tujuan & judul panel sesuai jenis. Tombol asli
+                     dipertahankan hidden supaya switchTab('tab-kapal') masih punya elemen rujukan. -->
+                <button onclick="switchTab('tab-kapal')" class="tab-btn hidden shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-kapal">
                     <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-ship text-[11px] text-cyan-400"></i></span>
                     <span>Kapal</span>
+                </button>
+                <button onclick="openTransferKapal('BBM')" class="tab-btn shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold flex items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-kapal-bbm">
+                    <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-truck-ramp-box text-[11px] text-teal-400"></i></span>
+                    <span>Kirim BBL</span>
+                </button>
+                <button onclick="openTransferKapal('LPG')" class="tab-btn shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold flex items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-kapal-lpg">
+                    <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-fire-flame-simple text-[11px] text-amber-500"></i></span>
+                    <span>LPG Curah</span>
                 </button>
                 <button onclick="switchTab('tab-partnership')" class="tab-btn shrink-0 whitespace-nowrap py-2 px-2 rounded-xl text-left text-xs font-semibold flex items-center gap-2 border border-transparent text-gray-400 hover:bg-gray-900/70 hover:text-gray-200 transition" id="btn-tab-partnership">
                     <span class="w-6 h-6 rounded-lg bg-gray-950/70 flex items-center justify-center shrink-0"><i class="fa-solid fa-handshake text-[11px] text-pink-400"></i></span>
@@ -577,10 +598,10 @@
                                 <span class="text-gray-200 font-semibold block">Kilang & Depo</span>
                                 <span class="block text-gray-500">Cek stok &amp; transfer</span>
                             </button>
-                            <button onclick="switchTab('tab-kapal')" class="bg-gray-950/60 hover:bg-gray-900 border border-gray-800 hover:border-cyan-500/30 rounded-xl p-2.5 text-left transition">
+                            <button onclick="openTransferKapal('BBM')" class="bg-gray-950/60 hover:bg-gray-900 border border-gray-800 hover:border-cyan-500/30 rounded-xl p-2.5 text-left transition">
                                 <span class="w-7 h-7 rounded-lg bg-cyan-500/10 flex items-center justify-center mb-1.5"><i class="fa-solid fa-ship text-cyan-400 text-[11px]"></i></span>
-                                <span class="text-gray-200 font-semibold block">Kapal</span>
-                                <span class="block text-gray-500">Kirim pasokan lewat laut</span>
+                                <span class="text-gray-200 font-semibold block">Kirim BBL / LPG Curah</span>
+                                <span class="block text-gray-500">Transfer pasokan antar depo</span>
                             </button>
                         </div>
                     </div>
@@ -608,13 +629,13 @@
                     </div>
                 </div>
 
-                <!-- Tab: Kapal (khusus transfer pasokan antar Kilang/Depo lewat laut, terpisah dari POM BBM yang khusus armada truk) -->
+                <!-- Tab: Kirim BBL & LPG Curah (transfer stok antar Kilang/Depo, terpisah dari dispatch BBM/LPG ke SPBU) -->
                 <div id="tab-kapal" class="tab-content hidden space-y-4">
                     <div class="bg-gray-950 p-3.5 rounded-xl border border-gray-800 shadow border-t-2 border-t-cyan-500">
-                        <h3 class="text-xs font-bold text-cyan-400 uppercase tracking-wider mb-1 flex items-center">
+                        <h3 id="kapal-panel-title" class="text-xs font-bold text-cyan-400 uppercase tracking-wider mb-1 flex items-center">
                             <i class="fa-solid fa-ship mr-2"></i> Transfer Stok Kilang via Kapal
                         </h3>
-                        <p class="text-[11px] text-gray-400 mb-2.5">Khusus mengirim pasokan curah dari Kilang Pusat ke Kilang/Depo Cabang yang punya akses pelabuhan, memakai armada Kapal Tanker (beli di tab Dealer). Kalau tujuan tidak berakses laut atau belum punya kapal, sistem otomatis memakai jalur darat sebagai cadangan. Tab ini terpisah dari POM BBM &amp; LPG yang khusus dipakai truk mengirim ke SPBU.</p>
+                        <p id="kapal-panel-desc" class="text-[11px] text-gray-400 mb-2.5">Khusus mengirim pasokan curah dari Kilang Pusat ke Kilang/Depo Cabang yang punya akses pelabuhan, memakai armada Kapal Tanker (beli di tab Dealer). Kalau tujuan tidak berakses laut atau belum punya kapal, sistem otomatis memakai jalur darat sebagai cadangan.</p>
                         <div class="space-y-2 text-xs">
                             <div>
                                 <label class="text-gray-400 block mb-1">Dari Kilang Asal:</label>

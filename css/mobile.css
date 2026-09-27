@@ -86,6 +86,20 @@
     #kpis-company{ max-width: 76px; font-size: 11px; }
     #game-time{ font-size: 10px; }
 
+    /* FIX BUG: panel notifikasi (lonceng) sebelumnya menempel persis di bawah ikon dengan lebar
+       tetap (w-80), jadi di HP sempit bisa kepotong di tepi kanan layar & menimpa baris header
+       kedua saat header pecah jadi 2 baris. Di HP, panel dibuat "docking" penuh di bawah seluruh
+       header dengan margin kiri-kanan aman, posisi top dihitung dinamis lewat JS (--notif-panel-top). */
+    #notif-panel{
+        position: fixed;
+        top: var(--notif-panel-top, 64px);
+        left: 8px;
+        right: 8px;
+        margin-top: 0;
+        width: auto;
+        max-width: none;
+    }
+
     /* "Manager ID" disembunyikan di layar sempit - logo MIGAS sudah cukup jadi identitas */
     @media (max-width: 420px){
         #header-top-row h1{ display: none; }

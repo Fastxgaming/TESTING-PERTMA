@@ -49,6 +49,9 @@
 
         let kilangFilter = 'ALL';
         function setKilangFilter(key) { kilangFilter = key; renderRefineries(); }
+        // Filter tujuan transfer di tab Kirim BBL/LPG Curah - diisi oleh openTransferKapal() (06-rute-transport.js)
+        // sesuai tombol nav mana yang dipencet, supaya dropdown tujuan cuma nampilin depo yang jenisnya cocok.
+        let transferFuelFilter = 'ALL';
         function renderRefineries() {
             kilangMarkers.forEach(km => map.removeLayer(km));
             kilangMarkers = [];
@@ -102,10 +105,13 @@
                     `;
 
                     if (kilang.id !== 'KILANG-01') {
-                        const opt = document.createElement('option');
-                        opt.value = kilang.id;
-                        opt.innerText = `${kilang.nama} (Sisa: ${kilang.stok_max - kilang.stok_current} ${kilang.unit})`;
-                        targetSelect.appendChild(opt);
+                        const kilangType = kilang.tipe.includes('LPG') ? 'LPG' : 'BBM';
+                        if (transferFuelFilter === 'ALL' || transferFuelFilter === kilangType) {
+                            const opt = document.createElement('option');
+                            opt.value = kilang.id;
+                            opt.innerText = `${kilang.nama} (Sisa: ${kilang.stok_max - kilang.stok_current} ${kilang.unit})`;
+                            targetSelect.appendChild(opt);
+                        }
                     }
                 } else {
                     card.innerHTML = `
@@ -168,7 +174,8 @@
             });
 
             if (targetSelect.options.length === 0) {
-                targetSelect.innerHTML = '<option value="">-- Beli Depo Cabang Terlebih Dahulu --</option>';
+                const noOptMsg = transferFuelFilter === 'LPG' ? '-- Belum Ada Depo Cabang LPG --' : transferFuelFilter === 'BBM' ? '-- Belum Ada Depo Cabang BBM --' : '-- Beli Depo Cabang Terlebih Dahulu --';
+                targetSelect.innerHTML = `<option value="">${noOptMsg}</option>`;
             }
             populateTransferKapal();
         }
@@ -781,6 +788,33 @@
             if (!target) return { target: null, pusat, neededType: null, coastal: false };
             const neededType = target.tipe.includes('LPG') ? 'LPG' : 'BBM';
             return { target, pusat, neededType, coastal: isCoastal(pusat) && isCoastal(target) };
+        }
+
+        // Pintu masuk khusus "Kirim BBL" (BBM) & "LPG Curah" ke tab-kapal (transfer stok antar Kilang/Depo).
+        // Dipanggil dari 2 tombol nav terpisah supaya jelas mana untuk BBM, mana untuk LPG - keduanya berbagi
+        // satu tab-content yang sama (tab-kapal), cuma filter tujuan & judul panelnya yang menyesuaikan.
+        function openTransferKapal(type) {
+            transferFuelFilter = type; // 'BBM' atau 'LPG' - dibaca renderRefineries() saat mengisi dropdown tujuan
+            switchTab('tab-kapal');
+            renderRefineries(); // isi ulang dropdown tujuan sesuai filter jenis yang baru dipilih
+
+            // switchTab menyorot & mengambil judul dari btn-tab-kapal generik (sengaja disembunyikan di nav) -
+            // timpa di sini supaya sorotan & judul panel mengikuti tombol spesifik yang benar-benar dipencet.
+            document.querySelectorAll('.tab-btn').forEach(el => { el.classList.remove('text-emerald-300', 'bg-emerald-500/10', 'border-emerald-500/25', 'shadow-inner'); el.classList.add('text-gray-400'); });
+            const btn = document.getElementById(type === 'LPG' ? 'btn-tab-kapal-lpg' : 'btn-tab-kapal-bbm');
+            if (btn) { btn.classList.add('text-emerald-300', 'bg-emerald-500/10', 'border-emerald-500/25', 'shadow-inner'); btn.classList.remove('text-gray-400'); }
+            const titleEl = document.getElementById('tab-panel-title');
+            if (titleEl && btn) { const icon = btn.querySelector('i'), label = btn.querySelector('span'); titleEl.innerHTML = (icon ? icon.outerHTML + ' ' : '') + (label ? label.textContent : ''); }
+
+            const panelTitle = document.getElementById('kapal-panel-title');
+            const panelDesc = document.getElementById('kapal-panel-desc');
+            if (type === 'LPG') {
+                if (panelTitle) panelTitle.innerHTML = '<i class="fa-solid fa-fire-flame-simple mr-2"></i> Kirim LPG Curah ke Depo/Cabang';
+                if (panelDesc) panelDesc.textContent = 'Khusus mengirim pasokan LPG curah dari Kilang Pusat ke Depo Cabang LPG yang punya akses pelabuhan, memakai Kapal Tanker LPG (beli di tab Dealer). Kalau tujuan tidak berakses laut atau belum punya kapal, sistem otomatis memakai jalur darat sebagai cadangan.';
+            } else {
+                if (panelTitle) panelTitle.innerHTML = '<i class="fa-solid fa-truck-ramp-box mr-2"></i> Kirim BBL ke Depo/Cabang';
+                if (panelDesc) panelDesc.textContent = 'Khusus mengirim pasokan BBL (bahan bakar mentah) dari Kilang Pusat ke Kilang/Depo Cabang BBM yang punya akses pelabuhan, memakai Kapal Tanker BBM (beli di tab Dealer). Kalau tujuan tidak berakses laut atau belum punya kapal, sistem otomatis memakai jalur darat sebagai cadangan.';
+            }
         }
 
         // Isi ulang dropdown Unit Kapal Tanker & tampilkan/sembunyikan panel laut vs darat sesuai kelayakan rute.

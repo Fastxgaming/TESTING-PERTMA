@@ -353,15 +353,28 @@
             const biayaBbm = est.biayaBbm, jamTempuh = est.jamTempuh;
             const karakterJalan = !real ? 'rute perkiraan' : sinuosity >= 1.22 ? 'jalan berkelok-kelok/banyak rintangan' : sinuosity >= 1.12 ? 'sedikit berkelok' : 'jalan renggang & lurus';
 
+            // Estimasi kotor & bersih: mengikuti persis rumus yang dipakai saat pendapatan benar-benar cair
+            // di completeUnloading (07-animasi-kapal.js) - MINUS bonus pesanan/jarak & potensi denda, karena
+            // itu baru pasti setelah truk benar-benar tiba. Jadi angka bersih di sini adalah estimasi MINIMAL
+            // (hasil riil biasanya sama atau lebih besar, kecuali kena denda pelanggaran KIR/dokumen).
+            const hargaPerUnit = truck.type === 'LPG' ? ECO.jualTon : ECO.jualKl;
+            const unitLabel = truck.type === 'LPG' ? 'Ton' : 'KL';
+            const revenueKotor = truck.cap * hargaPerUnit;
+            const biayaKirimDasar = Math.round(truck.cap * (truck.type === 'LPG' ? ECO.biayaKirimTon : ECO.biayaKirimKl));
             const totalPP = biayaBbm * 2;
+            const totalBiayaEstimasi = biayaKirimDasar + totalPP;
+            const revenueBersihEstimasi = revenueKotor - totalBiayaEstimasi;
 
             box.innerHTML = `
                 <div class="flex justify-between"><span>Asal &rarr; Tujuan</span><span class="text-gray-300 font-semibold">${esc(origin.nama)} &rarr; ${esc(spbu.nama)}</span></div>
                 <div class="flex justify-between"><span>Estimasi Jarak (1 arah)</span><span class="text-gray-300 font-mono">&plusmn;${Math.round(kmEfektif)} km</span></div>
                 <div class="flex justify-between"><span>Kondisi Jalan &amp; Kecepatan</span><span class="text-gray-300 font-mono">${karakterJalan} &middot; rata-rata ${Math.round(speedKmh)} km/j</span></div>
                 <div class="flex justify-between"><span>Estimasi Waktu Tempuh</span><span class="text-gray-300 font-mono">${fmtJam(jamTempuh)}</span></div>
-                <div class="flex justify-between"><span>Biaya BBM Solar (PP)</span><span class="text-red-400 font-mono">${formatRupiah(biayaBbm * 2)}</span></div>
-                <div class="flex justify-between border-t border-gray-800 mt-1 pt-1"><span class="font-bold text-gray-300">Total Estimasi Operasional (PP)</span><span class="font-bold text-gray-100 font-mono">${formatRupiah(totalPP)}</span></div>`;
+                <div class="flex justify-between mt-1 pt-1 border-t border-gray-800"><span>Pendapatan Kotor (${truck.cap} ${unitLabel})</span><span class="text-emerald-400 font-mono">${formatRupiah(revenueKotor)}</span></div>
+                <div class="flex justify-between"><span>Biaya Kirim Dasar</span><span class="text-red-400 font-mono">-${formatRupiah(biayaKirimDasar)}</span></div>
+                <div class="flex justify-between"><span>Biaya BBM Solar Truk (PP)</span><span class="text-red-400 font-mono">-${formatRupiah(totalPP)}</span></div>
+                <div class="flex justify-between border-t border-gray-800 mt-1 pt-1"><span class="font-bold text-gray-300">Estimasi Pendapatan Bersih</span><span class="font-bold ${revenueBersihEstimasi >= 0 ? 'text-emerald-300' : 'text-red-400'} font-mono">${formatRupiah(revenueBersihEstimasi)}</span></div>
+                <div class="text-[9px] text-gray-500 pt-0.5">*Belum termasuk bonus pesanan/jarak (bisa nambah) atau denda pelanggaran dokumen (bisa mengurangi) - baru pasti setelah truk tiba &amp; bongkar muatan.</div>`;
         }
 
         function distKm(a, b) {
