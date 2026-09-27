@@ -424,7 +424,7 @@
             if (gates) {
                 const [r1, r2, r3] = await Promise.all([
                     fetchRoute(origin, gates.entryPoint, 'nontol'),
-                    fetchRoute(gates.entryPoint, gates.exitPoint, 'tol'),
+                    fetchRouteMulti(gates.wayPts, 'tol'),
                     fetchRoute(gates.exitPoint, spbu, 'nontol')
                 ]);
                 if (mySeq !== routeEstimateSeq) return;
@@ -631,6 +631,49 @@
         function tollNetworkDist(net, srcIdx, dstIdx) {
             return tollNetworkDistAll(net, srcIdx)[dstIdx];
         }
+        // Sama seperti tollNetworkDistAll, tapi juga menyimpan node PENDAHULU (prev[]) tiap titik supaya rute
+        // (bukan cuma total jaraknya) bisa direkonstruksi - dipakai supaya polyline ruas "tol" yang digambar/
+        // dianimasikan benar-benar melewati SEMUA simpul jaringan tol di antara gerbang masuk & keluar (lihat
+        // tollNetworkPath), bukan cuma dikirim ke OSRM sebagai 2 titik ujung yang bisa saja "dipotong kompas"
+        // lewat jalan biasa kalau OSRM menganggap itu lebih pendek dari koordinat kasar gerbangnya.
+        function tollNetworkPrevAll(net, srcIdx) {
+            net._prevCache = net._prevCache || {};
+            if (net._prevCache[srcIdx]) return net._prevCache[srcIdx];
+            const n = net.nodes.length, dist = new Array(n).fill(Infinity), prev = new Array(n).fill(-1), visited = new Array(n).fill(false);
+            dist[srcIdx] = 0;
+            const adj = net._adj || (net._adj = (() => {
+                const a = Array.from({ length: n }, () => []);
+                net.edges.forEach(([i, j]) => {
+                    const w = distKm({ lat: net.nodes[i][0], lon: net.nodes[i][1] }, { lat: net.nodes[j][0], lon: net.nodes[j][1] });
+                    a[i].push([j, w]); a[j].push([i, w]);
+                });
+                return a;
+            })());
+            for (let iter = 0; iter < n; iter++) {
+                let u = -1, best = Infinity;
+                for (let k = 0; k < n; k++) if (!visited[k] && dist[k] < best) { best = dist[k]; u = k; }
+                if (u === -1) break;
+                visited[u] = true;
+                adj[u].forEach(([v, w]) => { if (dist[u] + w < dist[v]) { dist[v] = dist[u] + w; prev[v] = u; } });
+            }
+            net._prevCache[srcIdx] = prev;
+            return prev;
+        }
+        // Urutan node (index) jaringan tol dari srcIdx ke dstIdx mengikuti ruas yang BENAR-BENAR ada di
+        // TOLL_NETWORK - dipakai sebagai daftar waypoint paksa untuk OSRM (lihat pickTollGates/fetchRouteMulti)
+        // supaya jalur yang tergambar di peta benar-benar menyusuri jalan tol asli sepanjang interchange-nya,
+        // bukan cuma garis lurus perkiraan antara 2 titik ujung.
+        function tollNetworkPath(net, srcIdx, dstIdx) {
+            const prev = tollNetworkPrevAll(net, srcIdx);
+            const path = [dstIdx];
+            let cur = dstIdx, guard = net.nodes.length + 1;
+            while (cur !== srcIdx && guard-- > 0) {
+                cur = prev[cur];
+                if (cur === -1) return [srcIdx, dstIdx]; // tidak nyambung (seharusnya tidak terjadi kalau sudah lolos cek jarak) - fallback aman
+                path.push(cur);
+            }
+            return path.reverse();
+        }
         // Cari kombinasi gerbang-masuk & gerbang-keluar (di antara SEMUA kandidat yang jaraknya wajar dari asal/
         // tujuan) yang menghasilkan total rute lewat tol PALING PENDEK - bukan cuma pasangan node-terdekat.
         function bestTollRouteKm(a, b, net, entries, exits) {
@@ -669,9 +712,15 @@
             if (!best || best.total > distKm(a, b) * TOLL_DETOUR_RATIO) return null;
             const names = net.names || [];
             const [elat, elon] = net.nodes[best.entry.idx], [xlat, xlon] = net.nodes[best.exit.idx];
+            // Titik-titik jaringan tol yang dilewati antara gerbang masuk & keluar (termasuk keduanya sendiri di
+            // ujung-ujungnya) - dipakai sebagai waypoint PAKSA ke OSRM (lihat fetchRouteMulti) supaya jalur yang
+            // digambar benar-benar menyusuri badan jalan tol sepanjang interchange-nya, bukan cuma titik ujung.
+            const pathIdx = tollNetworkPath(net, best.entry.idx, best.exit.idx);
+            const wayPts = pathIdx.map(i => ({ lat: net.nodes[i][0], lon: net.nodes[i][1] }));
             return {
                 entryPoint: { lat: elat, lon: elon, nama: `Gerbang Tol ${names[best.entry.idx] || ''}`.trim() },
-                exitPoint: { lat: xlat, lon: xlon, nama: `Gerbang Tol ${names[best.exit.idx] || ''}`.trim() }
+                exitPoint: { lat: xlat, lon: xlon, nama: `Gerbang Tol ${names[best.exit.idx] || ''}`.trim() },
+                wayPts
             };
         }
         // Cek satu ruas perjalanan (asal & tujuan di PULAU YANG SAMA): apakah masuk akal lewat tol sebagian jalan.
@@ -819,6 +868,42 @@
             } finally {
                 clearTimeout(t);
             }
+        }
+        // Sama seperti osrmRequest, tapi menerima BANYAK titik (waypoint) berurutan, bukan cuma asal & tujuan -
+        // OSRM akan dipaksa melewati SETIAP titik itu (bukan cuma titik pertama & terakhir). Dipakai khusus
+        // untuk ruas "jalan tol": karena koordinat gerbang masuk/keluar di TOLL_NETWORK cuma perkiraan lokasi
+        // interchange (bukan titik presisi di badan jalan tol), kalau cuma dikirim 2 titik ujung ke OSRM, OSRM
+        // bebas memilih jalan APAPUN yang menurutnya tercepat di antara keduanya - kadang malah jalan biasa,
+        // bukan jalan tol itu sendiri (inilah sebabnya garis rute Tol kadang tidak menyusuri jalur tol asli/
+        // berwarna khusus di peta). Dengan mengirim SEMUA simpul interchange di antaranya sebagai waypoint
+        // wajib dilewati, OSRM terpaksa menyusuri badan jalan tol dari satu interchange ke interchange berikutnya.
+        async function osrmRequestMulti(points, extraParam) {
+            const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 7000);
+            try {
+                const coords = points.map(p => `${p.lon},${p.lat}`).join(';');
+                const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&continue_straight_at_waypoints=false${extraParam || ''}`, { signal: ctl.signal });
+                const j = await r.json();
+                if (j.code === 'Ok' && j.routes && j.routes[0]) {
+                    return { pts: j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]), real: true };
+                }
+                return null;
+            } catch (e) {
+                return null;
+            } finally {
+                clearTimeout(t);
+            }
+        }
+        // Versi fetchRoute yang menerima daftar waypoint (dipakai untuk ruas tol - lihat pickTollGates.wayPts).
+        // Kalau waypoint cuma 2 titik (jaringan tol area itu memang cuma punya 1 ruas antar node), otomatis sama
+        // saja dengan fetchRoute biasa. windingPath tetap dipakai sebagai jalan terakhir kalau OSRM tak terjangkau.
+        async function fetchRouteMulti(points, routeKey) {
+            if (points.length < 2) return { pts: [], real: false };
+            const key = `multi|${routeKey}|${points.map(p => `${p.lat},${p.lon}`).join('|')}`;
+            if (routeCache.has(key)) return routeCache.get(key);
+            let res = await osrmRequestMulti(points, '');
+            if (!res) res = { pts: windingPath(points[0], points[points.length - 1]), real: false };
+            routeCache.set(key, res);
+            return res;
         }
         async function fetchRoute(o, d, routeKey) {
             // routeKey ('tol'/'nontol') WAJIB ikut jadi bagian cache key & query OSRM - sebelumnya rute yang

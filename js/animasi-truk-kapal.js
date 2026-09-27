@@ -141,6 +141,21 @@
             await runVehicleLeg(pts, dur, { ...meta, vehicle: 'truck', speedKmh, baseSpeedKmh: speedKmh, segMode: routeKeyForFetch }, fit);
             return { km: total, dur, real, speedKmh, sinuosity };
         }
+        // Varian driveSegment yang lewat SERANGKAIAN waypoint wajib (bukan cuma asal & tujuan) - dipakai khusus
+        // ruas tengah "jalan tol" (lihat driveLeg) supaya truk benar-benar dianimasikan menyusuri badan jalan
+        // tol sepanjang interchange-nya (lihat fetchRouteMulti), bukan jalur bebas apapun yang OSRM pilih
+        // antara 2 titik ujung gerbang.
+        async function driveSegmentMulti(wayPts, meta, fit, routeKeyForFetch) {
+            const { pts, real } = await fetchRouteMulti(wayPts, routeKeyForFetch);
+            const straightKm = distKm(wayPts[0], wayPts[wayPts.length - 1]);
+            const { total: rawTotal, sinuosity } = sinuosityOf(pts, straightKm);
+            const speedKmh = roadSpeedKmh(sinuosity, real, routeKeyForFetch);
+            const rm = ROUTE_MODE[routeKeyForFetch] || ROUTE_MODE.tol;
+            const total = rawTotal * rm.distFactor;
+            const dur = (total / speedKmh) * (3600000 / GAME_SPEED);
+            await runVehicleLeg(pts, dur, { ...meta, vehicle: 'truck', speedKmh, baseSpeedKmh: speedKmh, segMode: routeKeyForFetch }, fit);
+            return { km: total, dur, real, speedKmh, sinuosity };
+        }
         async function driveLeg(from, to, meta, fit) {
             const rm = ROUTE_MODE[meta.routeMode] || ROUTE_MODE.tol;
             if (rm.key === 'tol') {
@@ -152,7 +167,7 @@
                 if (gates) {
                     const l1 = await driveSegment(from, gates.entryPoint, meta, fit, 'nontol');
                     addLog(`${meta.id} tiba di ${gates.entryPoint.nama}, masuk jalan tol...`, 'info', 'truck');
-                    const l2 = await driveSegment(gates.entryPoint, gates.exitPoint, meta, false, 'tol');
+                    const l2 = await driveSegmentMulti(gates.wayPts, meta, false, 'tol');
                     addLog(`${meta.id} keluar di ${gates.exitPoint.nama}, lanjut jalan biasa menuju tujuan...`, 'info', 'truck');
                     const l3 = await driveSegment(gates.exitPoint, to, meta, false, 'nontol');
                     const km = l1.km + l2.km + l3.km, dur = l1.dur + l2.dur + l3.dur;
