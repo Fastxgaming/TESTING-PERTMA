@@ -607,8 +607,6 @@
             const driverId = document.getElementById('delivery-driver-select').value;
             const kernetId = document.getElementById('delivery-kernet-select').value;
             const fuelType = document.getElementById('delivery-fuel-type').value;
-            const routeModeInput = document.querySelector('input[name="delivery-route-mode"]:checked');
-            const routeMode = routeModeInput ? routeModeInput.value : 'tol';
 
             const spbu = loadedSpbuList.find(s => s.kode === kodeSpbu);
             if (spbu && spbu.blocked) return showModal('SPBU Diblokir', 'Lisensi SPBU ini dicabut. Operasional dihentikan.', 'fa-ban', 'red');
@@ -630,11 +628,8 @@
             const kapKey = fBBM && FUEL_KAP_KEY[fBBM.id];
             const origin = pickOrigin('BBM', spbu, truck.cap, truck, kapKey);
             if (!origin) return showModal('Stok Kilang Kurang', `Tidak ada kilang/depo aktif dengan stok ${fuelType} (jadi) cukup untuk ${truck.cap} KL. Olah dulu BBL mentah jadi ${fuelType} di tab Kilang (tombol Konversi), atau transfer stok ${fuelType} ke depo.`, 'fa-gas-pump', 'red');
-            // Jaga-jaga di sisi server logic: kalau rute tol ternyata tidak tersedia untuk asal/tujuan ini
-            // (mis. UI belum sempat memperbarui kunci), paksa turun ke Non-Tol supaya tidak lolos kena tarif tol semu.
-            const routeModeFinal = tollRouteAvailable(origin, spbu) ? routeMode : 'nontol';
 
-            const d = { spbu, truck, driver, kernet, origin, jenisMuatan: fuelType, kapKey, hargaPerUnit: ECO.jualKl, routeMode: routeModeFinal };
+            const d = { spbu, truck, driver, kernet, origin, jenisMuatan: fuelType, kapKey, hargaPerUnit: ECO.jualKl };
             openSuratJalanModal({ mode: 'BBM', tujuanNama: spbu.nama, tujuanKode: spbu.kode, jenisMuatan: fuelType, volumeText: `${truck.cap} KL`, truck, driver, kernet,
                 execute: (no) => settleTruckDelivery(no, d) });
         }

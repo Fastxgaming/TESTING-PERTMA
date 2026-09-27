@@ -16,12 +16,20 @@
         width: auto;
         background: #0b0f17;
         border-right: none;
-        border-top: 1px solid #1f2937;
+        border-top: none;
         display: flex;
         flex-direction: row;
         overflow-x: auto;
-        padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+        padding: 7px 6px calc(6px + env(safe-area-inset-bottom, 0px));
         box-shadow: 0 -6px 22px rgba(0,0,0,.45);
+    }
+    /* Garis aksen "meteran BBM" di atas bottom nav - ciri khas visual MIGAS Manager,
+       menggantikan border abu-abu polos supaya nav bar tidak terlihat seperti template umum. */
+    #sidebar-tab-nav::before{
+        content:'';
+        position:absolute; top:0; left:0; right:0; height:2px;
+        background:linear-gradient(90deg,#0d9488,#2dd4bf 35%,#fbbf24 65%,#f59e0b);
+        opacity:.85;
     }
     #sidebar-tab-nav .tab-btn{
         position: relative;
@@ -31,9 +39,25 @@
         text-align: center;
         gap: 3px;
         min-width: 58px;
-        padding: 6px 6px;
+        padding: 7px 6px 6px;
         font-size: 9px;
         line-height: 1.1;
+        border-radius: .6rem;
+    }
+    /* Tab aktif: indikator titik "nyala" + ikon menyala, ganti gaya pill terang polos */
+    #sidebar-tab-nav .tab-btn.text-emerald-300{
+        background: rgba(45,212,191,.06) !important;
+        border-color: transparent !important;
+    }
+    #sidebar-tab-nav .tab-btn.text-emerald-300::after{
+        content:'';
+        position:absolute; top:1px; left:50%; transform:translateX(-50%);
+        width:14px; height:2.5px; border-radius:0 0 3px 3px;
+        background:linear-gradient(90deg,#2dd4bf,#fbbf24);
+        box-shadow:0 0 6px rgba(45,212,191,.8);
+    }
+    #sidebar-tab-nav .tab-btn.text-emerald-300 i{
+        filter: drop-shadow(0 0 5px rgba(45,212,191,.6));
     }
     #sidebar-tab-nav .tab-btn .ml-auto{
         margin-left: 0;

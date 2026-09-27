@@ -134,7 +134,7 @@
 
         let companyCash = 650000000;
         // ===== EKONOMI (sesuaikan di sini) =====
-        const ECO = { bblPerKl: 6.2898, jualKl: 7600000, jualTon: 10400000, hppTon: 9500000, bonusPesanan: 0.06, bonusJarakPerKm: 0.0008, jarakBonusCapKm: 175, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000 };
+        const ECO = { bblPerKl: 6.2898, jualKl: 10000000, jualTon: 10400000, hppTon: 9500000, bonusPesanan: 0.06, bonusJarakPerKm: 0.0008, jarakBonusCapKm: 175, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000 };
         let totalIncome = 0;
         let totalExpense = 0;
 

@@ -756,19 +756,8 @@
                             </div>
 
                             <div>
-                                <label class="text-gray-400 block mb-1">Pilih Rute Pengiriman:</label>
-                                <div class="grid grid-cols-2 gap-2">
-                                    <label id="delivery-route-tol-label" class="route-opt cursor-pointer flex flex-col gap-0.5 bg-gray-900 border border-emerald-600/60 rounded-lg p-2 text-[11px]" data-prefix="delivery" data-mode="tol">
-                                        <span class="flex items-center gap-1 font-bold text-gray-200"><input id="delivery-route-tol" type="radio" name="delivery-route-mode" value="tol" checked onchange="updateRouteEstimate('delivery')" class="accent-emerald-500"><i class="fa-solid fa-road text-emerald-400"></i> Rute Tol</span>
-                                        <span class="text-gray-500">Cepat &middot; kena tarif tol</span>
-                                    </label>
-                                    <label class="route-opt cursor-pointer flex flex-col gap-0.5 bg-gray-900 border border-gray-800 rounded-lg p-2 text-[11px]" data-prefix="delivery" data-mode="nontol">
-                                        <span class="flex items-center gap-1 font-bold text-gray-200"><input id="delivery-route-nontol" type="radio" name="delivery-route-mode" value="nontol" onchange="updateRouteEstimate('delivery')" class="accent-emerald-500"><i class="fa-solid fa-signs-post text-gray-400"></i> Rute Non-Tol</span>
-                                        <span class="text-gray-500">Gratis tol &middot; lebih jauh &amp; lambat</span>
-                                    </label>
-                                </div>
-                                <div id="delivery-route-lock-note" class="hidden mt-1.5 text-[10px] text-amber-400 leading-relaxed"><i class="fa-solid fa-lock mr-1"></i>Rute Tol terkunci - jaringan jalan tol belum menjangkau asal/tujuan pengiriman ini. Otomatis lewat Rute Non-Tol.</div>
-                                <div id="delivery-route-estimate" class="mt-2 bg-gray-900 border border-gray-800 rounded-lg p-2 text-[10px] text-gray-400 leading-relaxed">Pilih SPBU &amp; armada untuk melihat estimasi jarak, BBM &amp; tol.</div>
+                                <label class="text-gray-400 block mb-1">Estimasi Rute Pengiriman:</label>
+                                <div id="delivery-route-estimate" class="mt-2 bg-gray-900 border border-gray-800 rounded-lg p-2 text-[10px] text-gray-400 leading-relaxed">Pilih SPBU &amp; armada untuk melihat estimasi jarak &amp; BBM.</div>
                             </div>
 
                             <!-- SELEKSI DRIVER & KERNET KHUSUS DISPATCH -->
@@ -830,19 +819,8 @@
                             </div>
 
                             <div>
-                                <label class="text-gray-400 block mb-1">Pilih Rute Pengiriman:</label>
-                                <div class="grid grid-cols-2 gap-2">
-                                    <label id="lpg-route-tol-label" class="route-opt cursor-pointer flex flex-col gap-0.5 bg-gray-900 border border-amber-600/60 rounded-lg p-2 text-[11px]" data-prefix="lpg" data-mode="tol">
-                                        <span class="flex items-center gap-1 font-bold text-gray-200"><input id="lpg-route-tol" type="radio" name="lpg-route-mode" value="tol" checked onchange="updateRouteEstimate('lpg')" class="accent-amber-500"><i class="fa-solid fa-road text-amber-400"></i> Rute Tol</span>
-                                        <span class="text-gray-500">Cepat &middot; kena tarif tol</span>
-                                    </label>
-                                    <label class="route-opt cursor-pointer flex flex-col gap-0.5 bg-gray-900 border border-gray-800 rounded-lg p-2 text-[11px]" data-prefix="lpg" data-mode="nontol">
-                                        <span class="flex items-center gap-1 font-bold text-gray-200"><input id="lpg-route-nontol" type="radio" name="lpg-route-mode" value="nontol" onchange="updateRouteEstimate('lpg')" class="accent-amber-500"><i class="fa-solid fa-signs-post text-gray-400"></i> Rute Non-Tol</span>
-                                        <span class="text-gray-500">Gratis tol &middot; lebih jauh &amp; lambat</span>
-                                    </label>
-                                </div>
-                                <div id="lpg-route-lock-note" class="hidden mt-1.5 text-[10px] text-amber-400 leading-relaxed"><i class="fa-solid fa-lock mr-1"></i>Rute Tol terkunci - jaringan jalan tol belum menjangkau asal/tujuan pengiriman ini. Otomatis lewat Rute Non-Tol.</div>
-                                <div id="lpg-route-estimate" class="mt-2 bg-gray-900 border border-gray-800 rounded-lg p-2 text-[10px] text-gray-400 leading-relaxed">Pilih SPBU &amp; armada untuk melihat estimasi jarak, BBM &amp; tol.</div>
+                                <label class="text-gray-400 block mb-1">Estimasi Rute Pengiriman:</label>
+                                <div id="lpg-route-estimate" class="mt-2 bg-gray-900 border border-gray-800 rounded-lg p-2 text-[10px] text-gray-400 leading-relaxed">Pilih SPBU &amp; armada untuk melihat estimasi jarak &amp; BBM.</div>
                             </div>
 
                             <!-- SELEKSI DRIVER & KERNET LPG -->
@@ -1059,16 +1037,21 @@
             <div class="flex-1 relative rounded-xl overflow-hidden border border-gray-800 shadow-2xl">
                 <div id="map"></div>
 
-                <!-- Overlay Map Legend -->
-                <div class="absolute bottom-2 right-2 sm:bottom-4 sm:right-4 max-w-[62vw] sm:max-w-none bg-gray-900/95 border border-gray-800 backdrop-blur-md p-2 sm:p-3 rounded-xl shadow-2xl text-[9px] sm:text-[11px] z-[1000] space-y-1 sm:space-y-1.5">
-                    <div class="font-bold text-gray-200 mb-1 border-b border-gray-800 pb-1">Keterangan Peta</div>
-                    <div class="flex items-center space-x-2"><span class="w-3 h-3 rounded-full bg-teal-500 border border-white"></span><span>Kilang Pusat (Aktif)</span></div>
-                    <div class="flex items-center space-x-2"><span class="w-3 h-3 rounded-full bg-orange-500 border border-white"></span><span>Kilang/Depo Cabang (Aktif)</span></div>
-                    <div class="flex items-center space-x-2"><span class="w-3 h-3 rounded-full bg-gray-500 border border-gray-300"></span><span>Kilang Terkunci (Belum Dibeli)</span></div>
-                    <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span><span>SPBU Milik Perusahaan (COCO)</span></div>
-                    <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span><span>SPBU DODO (Disetujui)</span></div>
-                    <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span><span>SPBU + Outlet LPG</span></div>
-                    <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span><span>SPBU Diblokir (lisensi dicabut)</span></div>
+                <!-- Overlay Map Legend: ringkas & bisa dilipat di HP supaya tidak menutupi peta -->
+                <div id="map-legend" class="legend-box legend-collapsed absolute bottom-2 right-2 sm:bottom-4 sm:right-4 max-w-[58vw] sm:max-w-none bg-gray-900/95 border border-gray-800 backdrop-blur-md rounded-xl shadow-2xl text-[9px] sm:text-[11px] z-[1000]">
+                    <button type="button" onclick="document.getElementById('map-legend').classList.toggle('legend-collapsed')" class="legend-toggle w-full flex items-center justify-between gap-2 font-bold text-gray-200 px-2 py-1.5 sm:px-3 sm:py-2">
+                        <span><i class="fa-solid fa-layer-group text-amber-400 mr-1.5"></i>Keterangan Peta</span>
+                        <i class="fa-solid fa-chevron-down legend-chevron text-[9px] text-gray-500"></i>
+                    </button>
+                    <div class="legend-body space-y-1 sm:space-y-1.5 px-2 pb-2 sm:px-3 sm:pb-3">
+                        <div class="flex items-center space-x-2"><span class="w-3 h-3 rounded-full bg-teal-500 border border-white"></span><span>Kilang Pusat (Aktif)</span></div>
+                        <div class="flex items-center space-x-2"><span class="w-3 h-3 rounded-full bg-orange-500 border border-white"></span><span>Kilang/Depo Cabang (Aktif)</span></div>
+                        <div class="flex items-center space-x-2"><span class="w-3 h-3 rounded-full bg-gray-500 border border-gray-300"></span><span>Kilang Terkunci (Belum Dibeli)</span></div>
+                        <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span><span>SPBU Milik Perusahaan (COCO)</span></div>
+                        <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span><span>SPBU DODO (Disetujui)</span></div>
+                        <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span><span>SPBU + Outlet LPG</span></div>
+                        <div class="flex items-center space-x-2"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span><span>SPBU Diblokir (lisensi dicabut)</span></div>
+                    </div>
                 </div>
             </div>
 
