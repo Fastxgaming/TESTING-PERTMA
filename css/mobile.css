@@ -112,24 +112,5 @@
     #header-kpi-row span{ font-size: 10.5px; }
     #header-kpi-row #kpis-cash{ font-size: 11.5px; }
 
-    /* Tombol Aksi (Tutorial, Jeda, Top Up, Peringkat, Save Cloud, Akun) -> ikon bulat saja */
-    #header-actions-row{ gap: 6px; }
-    #header-actions-row > button,
-    #header-actions-row > div > button{
-        padding: 0;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 9999px;
-        font-size: 12px;
-    }
-    #header-actions-row .btn-label{ display: none; }
-    #header-actions-row i{ margin: 0 !important; font-size: 13px; }
-    #header-actions-row > div.rounded-full{ padding: 2px; gap: 2px; }
-    #header-actions-row #btn-cloud-load{ width: 24px; height: 24px; }
-    #header-actions-row #topup-badge{
-        position: absolute; top: -3px; right: -3px; margin-left: 0;
-    }
+    /* Tombol Aksi header: gaya tile ada di css/layout.css (.hbtn), tidak perlu override lagi di sini. */
 }

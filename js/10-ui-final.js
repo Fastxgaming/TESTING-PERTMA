@@ -98,7 +98,7 @@
                 const offlineMs = Math.max(0, Date.now() - sv.ts);
                 if (offlineMs > 0) orders.forEach(o => { o.t += offlineMs; });
             }
-            gameElapsed = sv.clock || 0; izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; if (!t.price) t.price = 500e6; }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0;
+            gameElapsed = sv.clock || 0; huluNormalize(sv.hulu); izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; if (!t.price) t.price = 500e6; }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0;
             document.getElementById('finance-history-log').innerHTML = '';
             financeEntries = [];
             (sv.fin || []).forEach(f => addFinanceLog(f.desc, f.amount));
@@ -219,7 +219,7 @@
             const now = Date.now();
             const delta = now - lastClockTick;
             lastClockTick = now;
-            if (currentAccount && !document.hidden && delta > 0) gameElapsed += delta;
+            if (currentAccount && !isSuspended() && delta > 0) gameElapsed += delta;
             renderClock();
         }
         function resumeClock() { lastClockTick = Date.now(); tickClock(); }
@@ -227,6 +227,52 @@
         document.addEventListener('visibilitychange', () => { if (!document.hidden) resumeClock(); });
         window.addEventListener('focus', resumeClock);
         renderClock();
+
+        // ===== TOMBOL JEDA PERMAINAN =====
+        let pauseStartedAt = 0;
+        function setPaused(on) {
+            if (on === gamePaused) return;
+            if (on) {
+                tickClock();                 // catat waktu game terakhir sebelum berhenti
+                gamePaused = true;
+                pauseStartedAt = Date.now();
+            } else {
+                const dur = Math.max(0, Date.now() - pauseStartedAt);
+                // Batas waktu pesanan dihitung dari waktu nyata: geser maju sebesar lama jeda.
+                orders.forEach(o => { o.t += dur; });
+                gamePaused = false;
+                lastClockTick = Date.now();  // jam lanjut dari titik berhenti, bukan mengejar
+            }
+            syncTravelSuspend();
+            renderPauseUi();
+            renderClock();
+        }
+        function renderPauseUi() {
+            const btn = document.getElementById('btn-pause-toggle');
+            if (btn) {
+                btn.querySelector('.hico').className = 'hico fa-solid ' + (gamePaused ? 'fa-play' : 'fa-pause');
+                btn.querySelector('.hlbl').textContent = gamePaused ? 'Lanjut' : 'Jeda';
+                btn.title = gamePaused ? 'Lanjutkan permainan' : 'Jeda permainan';
+                btn.style.setProperty('--hb', gamePaused ? '#34d399' : '#94a3b8');
+                btn.style.setProperty('--hbg', gamePaused ? 'rgba(52,211,153,.18)' : 'rgba(148,163,184,.14)');
+                btn.classList.toggle('hbtn-paused', gamePaused);
+            }
+            let bar = document.getElementById('pause-banner');
+            if (gamePaused && !bar) {
+                bar = document.createElement('div');
+                bar.id = 'pause-banner';
+                bar.innerHTML = '<i class="fa-solid fa-pause"></i><span>Permainan dijeda &mdash; jam, perjalanan, dan pesanan berhenti</span><button type="button">Lanjutkan</button>';
+                bar.querySelector('button').addEventListener('click', () => setPaused(false));
+                document.body.appendChild(bar);
+            } else if (!gamePaused && bar) bar.remove();
+            const gt = document.getElementById('game-time');
+            if (gt) gt.classList.toggle('opacity-50', gamePaused);
+        }
+        document.getElementById('btn-pause-toggle').addEventListener('click', () => {
+            if (!currentAccount) return;
+            setPaused(!gamePaused);
+            if (typeof notify === 'function') notify(gamePaused ? 'Permainan dijeda.' : 'Permainan dilanjutkan.', 'info');
+        });
 
         // ===== STOK SPBU & PESANAN OTOMATIS =====
         const busyIds = new Set();
@@ -322,6 +368,7 @@
             }
         }
         function tickStock() {
+            if (gamePaused) return; // jeda manual: stok SPBU & batas waktu pesanan ikut berhenti
             const now = Date.now();
             processKirPending();
             orders.slice().forEach(o => { if (now - o.t > ORDER_TTL) {

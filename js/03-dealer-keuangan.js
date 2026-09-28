@@ -245,7 +245,7 @@
         }
 
         // Tab yang tampil menggantikan peta (Peta & Dealer tetap tampil inline di sidebar)
-        const POPUP_TABS = ['tab-kilang', 'tab-dealer', 'tab-delivery', 'tab-lpg', 'tab-kapal', 'tab-fleet', 'tab-bursa', 'tab-drivers', 'tab-partnership', 'tab-finance', 'tab-orders', 'tab-leaderboard'];
+        const POPUP_TABS = ['tab-kilang', 'tab-hulu', 'tab-dealer', 'tab-delivery', 'tab-lpg', 'tab-kapal', 'tab-fleet', 'tab-bursa', 'tab-drivers', 'tab-partnership', 'tab-finance', 'tab-orders', 'tab-leaderboard'];
 
         let currentTabId = 'tab-map-view';
         function switchTab(tabId) {
@@ -273,6 +273,7 @@
             if (tabId === 'tab-orders') renderOrders();
             if (tabId === 'tab-delivery' || tabId === 'tab-lpg') populateSpbuDropdowns(document.getElementById('delivery-region-filter') ? document.getElementById('delivery-region-filter').value : 'ALL');
             if (tabId === 'tab-kapal') populateTransferKapal();
+            if (tabId === 'tab-hulu' && typeof huluRender === 'function') huluRender();
             if (tabId === 'tab-bursa') { startBursaListingsListener(); renderBursa(); }
             const activeBtn = document.getElementById('btn-' + tabId);
             // Tombol yang bukan bagian nav sidebar (mis. Peringkat di header) sengaja tidak diberi class

@@ -354,27 +354,33 @@
             const karakterJalan = !real ? 'rute perkiraan' : sinuosity >= 1.22 ? 'jalan berkelok-kelok/banyak rintangan' : sinuosity >= 1.12 ? 'sedikit berkelok' : 'jalan renggang & lurus';
 
             // Estimasi kotor & bersih: mengikuti persis rumus yang dipakai saat pendapatan benar-benar cair
-            // di completeUnloading (07-animasi-kapal.js) - MINUS bonus pesanan/jarak & potensi denda, karena
-            // itu baru pasti setelah truk benar-benar tiba. Jadi angka bersih di sini adalah estimasi MINIMAL
-            // (hasil riil biasanya sama atau lebih besar, kecuali kena denda pelanggaran KIR/dokumen).
+            // di completeUnloading (07-animasi-kapal.js), TERMASUK bonus jarak (di atas jarakBonusMinKm) dan biaya
+            // solar pulang-pergi (PP) - MINUS bonus pesanan & potensi denda, karena itu baru pasti setelah truk
+            // benar-benar tiba (hasil riil bisa lebih besar, atau berkurang kalau kena denda KIR/dokumen).
             const hargaPerUnit = truck.type === 'LPG' ? ECO.jualTon : ECO.jualKl;
             const unitLabel = truck.type === 'LPG' ? 'Ton' : 'KL';
-            const revenueKotor = truck.cap * hargaPerUnit;
+            const revenueDasar = truck.cap * hargaPerUnit;
+            const jarakBonusKm = Math.max(0, Math.min(kmEfektif, ECO.jarakBonusCapKm) - ECO.jarakBonusMinKm);
+            const bonusJarak = Math.round(revenueDasar * ECO.bonusJarakPerKm * jarakBonusKm);
+            const revenueKotor = revenueDasar + bonusJarak;
             const biayaKirimDasar = Math.round(truck.cap * (truck.type === 'LPG' ? ECO.biayaKirimTon : ECO.biayaKirimKl));
+            const kmPP = kmEfektif * 2;
             const totalPP = biayaBbm * 2;
             const totalBiayaEstimasi = biayaKirimDasar + totalPP;
             const revenueBersihEstimasi = revenueKotor - totalBiayaEstimasi;
 
             box.innerHTML = `
                 <div class="flex justify-between"><span>Asal &rarr; Tujuan</span><span class="text-gray-300 font-semibold">${esc(origin.nama)} &rarr; ${esc(spbu.nama)}</span></div>
-                <div class="flex justify-between"><span>Estimasi Jarak (1 arah)</span><span class="text-gray-300 font-mono">&plusmn;${Math.round(kmEfektif)} km</span></div>
+                <div class="flex justify-between"><span>Estimasi Jarak (1 arah / PP)</span><span class="text-gray-300 font-mono">&plusmn;${Math.round(kmEfektif)} km / &plusmn;${Math.round(kmPP)} km</span></div>
                 <div class="flex justify-between"><span>Kondisi Jalan &amp; Kecepatan</span><span class="text-gray-300 font-mono">${karakterJalan} &middot; rata-rata ${Math.round(speedKmh)} km/j</span></div>
                 <div class="flex justify-between"><span>Estimasi Waktu Tempuh</span><span class="text-gray-300 font-mono">${fmtJam(jamTempuh)}</span></div>
-                <div class="flex justify-between mt-1 pt-1 border-t border-gray-800"><span>Pendapatan Kotor (${truck.cap} ${unitLabel})</span><span class="text-emerald-400 font-mono">${formatRupiah(revenueKotor)}</span></div>
+                <div class="flex justify-between mt-1 pt-1 border-t border-gray-800"><span>Pendapatan Dasar (${truck.cap} ${unitLabel})</span><span class="text-emerald-400 font-mono">${formatRupiah(revenueDasar)}</span></div>
+                <div class="flex justify-between"><span>Bonus Jarak${jarakBonusKm > 0 ? ` (+${Math.round(jarakBonusKm)} km di atas ${ECO.jarakBonusMinKm} km)` : ` (di bawah ${ECO.jarakBonusMinKm} km)`}</span><span class="text-emerald-400 font-mono">+${formatRupiah(bonusJarak)}</span></div>
+                <div class="flex justify-between"><span>Pendapatan Kotor</span><span class="text-emerald-400 font-mono">${formatRupiah(revenueKotor)}</span></div>
                 <div class="flex justify-between"><span>Biaya Kirim Dasar</span><span class="text-red-400 font-mono">-${formatRupiah(biayaKirimDasar)}</span></div>
-                <div class="flex justify-between"><span>Biaya BBM Solar Truk (PP)</span><span class="text-red-400 font-mono">-${formatRupiah(totalPP)}</span></div>
+                <div class="flex justify-between"><span>Biaya BBM Solar Truk (PP, &plusmn;${Math.round(kmPP)} km)</span><span class="text-red-400 font-mono">-${formatRupiah(totalPP)}</span></div>
                 <div class="flex justify-between border-t border-gray-800 mt-1 pt-1"><span class="font-bold text-gray-300">Estimasi Pendapatan Bersih</span><span class="font-bold ${revenueBersihEstimasi >= 0 ? 'text-emerald-300' : 'text-red-400'} font-mono">${formatRupiah(revenueBersihEstimasi)}</span></div>
-                <div class="text-[9px] text-gray-500 pt-0.5">*Belum termasuk bonus pesanan/jarak (bisa nambah) atau denda pelanggaran dokumen (bisa mengurangi) - baru pasti setelah truk tiba &amp; bongkar muatan.</div>`;
+                <div class="text-[9px] text-gray-500 pt-0.5">*Belum termasuk bonus pesanan (bisa nambah) atau denda pelanggaran dokumen (bisa mengurangi) - baru pasti setelah truk tiba &amp; bongkar muatan.</div>`;
         }
 
         function distKm(a, b) {
@@ -446,8 +452,9 @@
         // travelTimers: daftar timer "antre pelabuhan" & "bongkar-muat" yang sedang berjalan, supaya ikut
         // dijeda/dilanjutkan manual (setTimeout biasa tidak otomatis berhenti saat tab disembunyikan).
         const travelTimers = new Set();
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
+        // Sinkronkan jam virtual & timer perjalanan dengan status berhenti (tab tersembunyi ATAU jeda manual).
+        function syncTravelSuspend() {
+            if (isSuspended()) {
                 if (!hideStartedAt) hideStartedAt = Date.now();
                 travelTimers.forEach(tm => tm.pause());
             } else if (hideStartedAt) {
@@ -455,7 +462,8 @@
                 hideStartedAt = null;
                 travelTimers.forEach(tm => tm.resume());
             }
-        });
+        }
+        document.addEventListener('visibilitychange', syncTravelSuspend);
         // Pengganti setTimeout yang bisa dijeda - dipakai untuk antre pelabuhan & waktu bongkar-muat.
         function pausableDelay(ms) {
             return new Promise(resolve => {
@@ -465,7 +473,7 @@
                     resume() { if (!handle) { lastStart = Date.now(); handle = setTimeout(() => { travelTimers.delete(timer); resolve(); }, Math.max(0, remaining)); } }
                 };
                 travelTimers.add(timer);
-                if (!document.hidden) timer.resume();
+                if (!isSuspended()) timer.resume();
             });
         }
         const sleep = ms => pausableDelay(ms);
@@ -502,21 +510,60 @@
         // supaya jalur yang digambar/dianimasikan di peta selalu konsisten dengan yang dipakai untuk
         // menghitung jarak, kecepatan & durasi (lihat sinuosityOf/roadSpeedKmh) - benar-benar mengikuti
         // rintangan/kelokan jalur asli yang dilalui, bukan direkayasa jadi 2 gaya rute berbeda.
+        //
+        // FIX BUG "makin banyak unit, rute makin ngawur": server OSRM publik membatasi jumlah request per detik.
+        // Sebelumnya tiap truk yang berangkat langsung menembak request sendiri-sendiri (dan kalau 1x gagal/timeout
+        // langsung jatuh ke rute perkiraan yang berkelok palsu menembus hutan/laut). Makin banyak unit berangkat
+        // bersamaan -> makin banyak yang kena batas -> makin banyak rute palsu. Rute PULANG normal karena baru
+        // diminta belasan detik kemudian saat "hujan request" sudah reda. Sekarang:
+        //  1) request diantre & dijarangkan (min. jeda antar request),
+        //  2) request rute yang sama yang sedang berjalan digabung (tidak dobel),
+        //  3) gagal -> coba lagi beberapa kali dengan jeda bertahap, selang-seling ke server cadangan,
+        //  4) rute pergi otomatis juga disimpan untuk rute pulang (dibalik) -> menghemat request,
+        //  5) rute perkiraan palsu hanya dipakai kalau SEMUA percobaan gagal.
+        const routeInflight = new Map();
+        const ROUTE_HOSTS = [
+            (o, d) => `https://router.project-osrm.org/route/v1/driving/${o.lon},${o.lat};${d.lon},${d.lat}?overview=full&geometries=geojson`,
+            (o, d) => `https://routing.openstreetmap.de/routed-car/route/v1/driving/${o.lon},${o.lat};${d.lon},${d.lat}?overview=full&geometries=geojson`
+        ];
+        const ROUTE_MIN_GAP_MS = 450, ROUTE_MAX_TRY = 5;
+        let routeSlotTail = Promise.resolve(), routeLastStart = 0;
+        function nextRouteSlot() {
+            routeSlotTail = routeSlotTail.then(async () => {
+                const wait = routeLastStart + ROUTE_MIN_GAP_MS - Date.now();
+                if (wait > 0) await new Promise(r => setTimeout(r, wait));
+                routeLastStart = Date.now();
+            });
+            return routeSlotTail;
+        }
         async function fetchRoute(o, d) {
             const key = `${o.lat},${o.lon}|${d.lat},${d.lon}`;
             if (routeCache.has(key)) return routeCache.get(key);
-            try {
-                const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 7000);
-                const r = await fetch(`https://router.project-osrm.org/route/v1/driving/${o.lon},${o.lat};${d.lon},${d.lat}?overview=full&geometries=geojson`, { signal: ctl.signal });
-                clearTimeout(t);
-                const j = await r.json();
-                if (j.code === 'Ok' && j.routes && j.routes[0]) {
-                    const res = { pts: j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]), real: true };
-                    routeCache.set(key, res);
-                    return res;
+            if (routeInflight.has(key)) return routeInflight.get(key);
+            const job = (async () => {
+                for (let attempt = 0; attempt < ROUTE_MAX_TRY; attempt++) {
+                    await nextRouteSlot();
+                    try {
+                        const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 8000);
+                        const r = await fetch(ROUTE_HOSTS[attempt % ROUTE_HOSTS.length](o, d), { signal: ctl.signal });
+                        clearTimeout(t);
+                        const j = await r.json().catch(() => null);
+                        if (j && j.code === 'Ok' && j.routes && j.routes[0]) {
+                            const pts = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+                            const res = { pts, real: true };
+                            routeCache.set(key, res);
+                            const rkey = `${d.lat},${d.lon}|${o.lat},${o.lon}`;
+                            if (!routeCache.has(rkey)) routeCache.set(rkey, { pts: pts.slice().reverse(), real: true });
+                            return res;
+                        }
+                        if (j && j.code === 'NoRoute') break; // memang tidak ada jalan, tidak perlu diulang
+                    } catch (e) { /* coba lagi */ }
+                    await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
                 }
-            } catch (e) { /* jatuh ke rute perkiraan */ }
-            return { pts: windingPath(o, d), real: false };
+                return { pts: windingPath(o, d), real: false }; // benar-benar gagal semua -> rute perkiraan (tidak di-cache)
+            })();
+            routeInflight.set(key, job);
+            try { return await job; } finally { routeInflight.delete(key); }
         }
 
         function posAt(pts, cum, sd) {

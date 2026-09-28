@@ -445,10 +445,14 @@
         // sebelumnya, cuma sekarang benar-benar terlihat progresnya, bukan cuma badge statis lalu tiba-tiba penuh).
         function animateRefineFill(kilang, slot, addAmount, durasiMs, onDone) {
             const startCur = slot.cur, target = Math.min(slot.max, Math.round((startCur + addAmount) * 100) / 100);
-            const t0 = performance.now();
+            let t0 = performance.now(), lastT = t0;
             const TICK_MS = 150;
             const iv = setInterval(() => {
-                const frac = Math.min(1, (performance.now() - t0) / durasiMs);
+                const nowT = performance.now();
+                // Selama jeda manual, geser titik awal supaya progres pengolahan ikut berhenti.
+                if (gamePaused) { t0 += nowT - lastT; lastT = nowT; return; }
+                lastT = nowT;
+                const frac = Math.min(1, (nowT - t0) / durasiMs);
                 slot.cur = Math.round((startCur + (target - startCur) * frac) * 100) / 100;
                 updateKilangLiveBars(kilang);
                 if (frac >= 1) {

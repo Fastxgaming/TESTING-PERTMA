@@ -1,11 +1,16 @@
         // ===== LAYAR LOADING & PLAY GAME (sebelum Daftar/Masuk) =====
         // Satu-satunya tempat untuk update nomor versi - otomatis tampil di layar loading & layar "Main Sekarang".
-        const APP_VERSION = '1.1.0';
+        const APP_VERSION = '1.3.0';
         (function showAppVersion() {
             const label = 'v' + APP_VERSION;
             const a = document.getElementById('app-version-loading'); if (a) a.textContent = label;
             const b = document.getElementById('app-version-splash'); if (b) b.textContent = label;
         })();
+        // ===== STATUS JEDA PERMAINAN (tombol "Jeda" di header) =====
+        // gamePaused = jeda manual dari pemain. isSuspended() = game berhenti, entah karena jeda manual
+        // ATAU karena tab/window tidak aktif (perilaku lama). Dipakai jam game, animasi truk/kapal, dst.
+        let gamePaused = false;
+        const isSuspended = () => document.hidden || gamePaused;
         let loadingAnimDone = false, authChecked = false, loadingHidden = false;
         function hideLoadingOverlay() {
             if (loadingHidden) return;
@@ -27,6 +32,7 @@
             if (sp) {
                 sp.style.opacity = '1';
                 sp.classList.remove('hidden');
+                if (typeof renderSplashAccount === 'function') renderSplashAccount();
             }
         }
         function maybeFinish() { if (loadingAnimDone && authChecked) finishLoadingIfReady(); }
@@ -95,6 +101,8 @@
             }
         }
         function backToSplash() {
+            if (typeof pendingCloudLoad !== 'undefined') pendingCloudLoad = false;
+            if (typeof renderSplashAccount === 'function') renderSplashAccount();
             document.getElementById('auth-overlay').classList.add('hidden');
             document.getElementById('splash-overlay').classList.remove('hidden');
         }
@@ -134,7 +142,7 @@
 
         let companyCash = 650000000;
         // ===== EKONOMI (sesuaikan di sini) =====
-        const ECO = { bblPerKl: 6.2898, jualKl: 10000000, jualTon: 10400000, hppTon: 9500000, bonusPesanan: 0.06, bonusJarakPerKm: 0.0008, jarakBonusCapKm: 175, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000 };
+        const ECO = { bblPerKl: 6.2898, jualKl: 10000000, jualTon: 10400000, hppTon: 9500000, bonusPesanan: 0.06, bonusJarakPerKm: 0.0015, jarakBonusMinKm: 50, jarakBonusCapKm: 300, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000 };
         let totalIncome = 0;
         let totalExpense = 0;
 
