@@ -834,7 +834,7 @@
             let ships = [];
             if (info.target && info.coastal) {
                 ships = companyFleet.filter(t => t.kelas === 'kapal' && t.type === info.neededType && !busyIds.has(t.id));
-                ships.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.innerText = `${s.id} [${s.plat}] - ${s.name} (${s.cap.toLocaleString()} ${info.neededType === 'LPG' ? 'Ton' : 'KL'})`; sel.appendChild(o); });
+                ships.forEach(s => { const o = document.createElement('option'); o.value = s.id; o.innerText = `${s.id} [${s.plat}] - ${s.name} (${s.cap.toLocaleString('id-ID')} ${info.neededType === 'LPG' ? 'Ton' : 'Bbl'})`; sel.appendChild(o); });
             }
             if (prev && sel.querySelector(`option[value="${prev}"]`)) sel.value = prev;
             else if (sel.options.length) sel.selectedIndex = 0;
@@ -888,20 +888,28 @@
                 if (busyCheck(kapal, nahkoda, abk)) return;
                 if (docBlock(kapal)) return;
 
-                const bblUse = target.unit === 'KL' ? Math.ceil(kapal.cap * ECO.bblPerKl) : kapal.cap;
-                if (pusat.stok_current < bblUse) return showModal('Stok Kurang', `Stok Kilang Tuban tidak cukup untuk memuat kapal (butuh setara ${kapal.cap.toLocaleString()} ${target.unit}).`, 'fa-triangle-exclamation', 'red');
+                // Muatan = yang terkecil dari: kapasitas kapal, stok Kilang Tuban, dan ruang kosong di tangki depo tujuan
+                // (kapal besar tidak lagi butuh stok/ruang sebesar kapasitas penuhnya).
+                const roomTujuan = (target.kap && target.kap.lpg_curah && target.tipe.includes('LPG')) ? target.kap.lpg_curah.max - target.kap.lpg_curah.cur : target.stok_max - target.stok_current;
+                // Kapal LPG mengambil dari tangki LPG Curah Tuban; kapal BBM dari stok minyak mentah.
+                const srcLpg = neededType === 'LPG' && pusat.kap && pusat.kap.lpg_curah ? pusat.kap.lpg_curah : null;
+                const srcStok = () => srcLpg ? srcLpg.cur : pusat.stok_current;
+                const muat = Math.floor(Math.min(kapal.cap, srcStok(), Math.max(0, roomTujuan)));
+                if (roomTujuan < 1) return showModal('Tangki Depo Penuh', `Tangki ${target.nama} sudah penuh, tidak ada ruang untuk muatan baru.`, 'fa-circle-info', 'blue');
+                if (muat < 1) return showModal('Stok Kurang', srcLpg ? 'Tangki LPG Curah Kilang Tuban kosong, tidak ada yang bisa dimuat kapal.' : 'Stok Kilang Tuban kosong, tidak ada yang bisa dimuat kapal.', 'fa-triangle-exclamation', 'red');
+                const bblUse = target.unit === 'KL' ? Math.ceil(muat * ECO.bblPerKl) : muat;
 
-                const d = { spbu: target, truck: kapal, driver: nahkoda, kernet: abk, origin: pusat };
-                openSuratJalanModal({ mode: 'KLG', tujuanNama: target.nama, tujuanKode: target.id, jenisMuatan: `${neededType} Curah (dari Kilang Pusat Tuban)`, volumeText: `${kapal.cap.toLocaleString()} ${target.unit}`,
+                const d = { spbu: target, truck: kapal, driver: nahkoda, kernet: abk, origin: pusat, amount: muat };
+                openSuratJalanModal({ mode: 'KLG', tujuanNama: target.nama, tujuanKode: target.id, jenisMuatan: `${neededType} Curah (dari Kilang Pusat Tuban)`, volumeText: `${muat.toLocaleString('id-ID')} ${target.unit} (kapasitas kapal ${kapal.cap.toLocaleString('id-ID')})`,
                     truck: kapal, driver: nahkoda, kernet: abk, labels: { truk: 'Unit Kapal Tanker', plat: 'No. Registrasi', driver: 'Nahkoda Bertugas', kernet: 'ABK Pendamping' },
                     execute: (nomorSJ) => {
-                        if (pusat.stok_current < bblUse) return showModal('Stok Kurang', 'Stok Kilang Tuban tidak mencukupi!', 'fa-triangle-exclamation', 'red');
-                        pusat.stok_current = Math.max(0, pusat.stok_current - bblUse);
+                        if (srcStok() < (srcLpg ? muat : bblUse)) return showModal('Stok Kurang', 'Stok Kilang Tuban tidak mencukupi!', 'fa-triangle-exclamation', 'red');
+                        if (srcLpg) srcLpg.cur = Math.round(Math.max(0, srcLpg.cur - muat) * 100) / 100; else pusat.stok_current = Math.max(0, pusat.stok_current - bblUse);
                         renderRefineries();
                         d.nomorSJ = nomorSJ;
                         animateKapalTransfer(d);
-                        addLog(`SURAT JALAN ${nomorSJ}: Kapal ${kapal.id} [Nahkoda: ${nahkoda.name}] DITANDATANGANI & BERLAYAR membawa ${kapal.cap.toLocaleString()} ${target.unit} ${neededType} curah ke ${target.nama}.`, 'purple');
-                        showModal('Kapal Berangkat', `Surat Jalan ${nomorSJ} telah ditandatangani. ${kapal.id} resmi berlayar membawa ${kapal.cap.toLocaleString()} ${target.unit} ke ${target.nama}.\nStok depo tujuan bertambah otomatis setelah kapal tiba & kru selesai bongkar muatan.`, 'fa-ship', 'blue');
+                        addLog(`SURAT JALAN ${nomorSJ}: Kapal ${kapal.id} [Nahkoda: ${nahkoda.name}] DITANDATANGANI & BERLAYAR membawa ${muat.toLocaleString('id-ID')} ${target.unit} ${neededType} curah ke ${target.nama}.`, 'purple');
+                        showModal('Kapal Berangkat', `Surat Jalan ${nomorSJ} telah ditandatangani. ${kapal.id} resmi berlayar membawa ${muat.toLocaleString('id-ID')} ${target.unit} ke ${target.nama}.\nStok depo tujuan bertambah otomatis setelah kapal tiba & kru selesai bongkar muatan.`, 'fa-ship', 'blue');
                     } });
                 return;
             }

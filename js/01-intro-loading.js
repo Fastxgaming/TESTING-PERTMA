@@ -162,7 +162,7 @@
                 lon: 111.962100,
                 is_unlocked: true,
                 stok_current: 1000000,
-                stok_max: 1000000,
+                stok_max: 5000000,
                 unit: 'Bbl',
                 harga_beli: 0,
                 mekanikId: 'BUILTIN'

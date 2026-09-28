@@ -85,7 +85,7 @@
         function applySave(sv) {
             sv = migrateLegacy(sv);
             companyCash = sv.cash; totalIncome = sv.income; totalExpense = sv.expense;
-            sv.refineries.forEach(r => { const k = refineryData.find(x => x.id === r.id); if (k) { k.is_unlocked = r.u; k.stok_current = r.s; if (r.m) k.stok_max = r.m; if (r.lvl !== undefined) k.stokUpgradeLevel = r.lvl; if (r.mid !== undefined) k.mekanikId = r.mid; if (r.kap) k.kap = r.kap; } });
+            sv.refineries.forEach(r => { const k = refineryData.find(x => x.id === r.id); if (k) { k.is_unlocked = r.u; k.stok_current = r.s; if (r.m) k.stok_max = r.m; if (k.id === 'KILANG-01' && k.stok_max < 5000000) k.stok_max = 5000000; /* save lama: naikkan tangki Tuban ke 5 juta Bbl */ if (r.lvl !== undefined) k.stokUpgradeLevel = r.lvl; if (r.mid !== undefined) k.mekanikId = r.mid; if (r.kap) k.kap = r.kap; } });
             companyFleet = sv.fleet; companyCrew = sv.crew; crewIdCounter = sv.crewCounter; suratJalanCounter = sv.sj; { const saved = sv.spbu || [], m = new Map(saved.map(s => [s.kode, s]));
               loadedSpbuList = loadedSpbuList.map(s => m.get(s.kode) || s);
               const have = new Set(loadedSpbuList.map(s => s.kode)); saved.forEach(s => { if (!have.has(s.kode)) loadedSpbuList.push(s); }); }
@@ -98,7 +98,7 @@
                 const offlineMs = Math.max(0, Date.now() - sv.ts);
                 if (offlineMs > 0) orders.forEach(o => { o.t += offlineMs; });
             }
-            gameElapsed = sv.clock || 0; huluNormalize(sv.hulu); izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; if (!t.price) t.price = 500e6; }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0;
+            gameElapsed = sv.clock || 0; huluNormalize(sv.hulu); izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (t.kelas === 'kapal' && t.type === 'BBM' && / KL$/.test(t.name || '')) { t.cap = Math.round(t.cap * ECO.bblPerKl / 100) * 100; t.name = 'Kapal Tanker BBM ' + t.cap.toLocaleString('id-ID') + ' Bbl'; } if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; if (!t.price) t.price = 500e6; }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0;
             document.getElementById('finance-history-log').innerHTML = '';
             financeEntries = [];
             (sv.fin || []).forEach(f => addFinanceLog(f.desc, f.amount));
@@ -301,7 +301,7 @@
         let nextStockTickGt = 0; // gameNow() paling cepat stok SPBU boleh diturunkan lagi
 
         const fuelsOf = s => FUELS.filter(f => !f.lpg || s.has_lpg);
-        const capsOf = type => [...new Set(companyFleet.filter(t => t.type === type).map(t => t.cap))];
+        const capsOf = type => [...new Set(companyFleet.filter(t => t.type === type && t.kelas !== 'kapal').map(t => t.cap))];
         // Tingkat keramaian SPBU menentukan seberapa cepat BBM/LPG habis: rata-rata butuh beberapa hari,
         // bukan hitungan jam. Ramai = kota besar/jalur utama, Sepi = daerah kecil, Sedang = di antaranya.
         const TRAFFIC = { Ramai: { p: 0.25, mult: 1.4, label: 'Ramai' }, Sedang: { p: 0.5, mult: 1.0, label: 'Sedang' }, Sepi: { p: 0.25, mult: 0.6, label: 'Sepi' } };

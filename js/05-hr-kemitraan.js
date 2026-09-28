@@ -595,7 +595,7 @@
             const sisa = Math.round((o.kl - o.terkirim) * 10) / 10;
             if (truck.cap >= sisa) return null; // truk ini sendiri sudah cukup buat lunasi sisa pesanan
             const unit = type === 'LPG' ? 'Ton' : 'KL';
-            const better = companyFleet.find(t => t.type === type && t.id !== truck.id && t.cap >= sisa && !busyIds.has(t.id));
+            const better = companyFleet.find(t => t.type === type && t.kelas !== 'kapal' && t.id !== truck.id && t.cap >= sisa && !busyIds.has(t.id));
             if (!better) return null; // tidak ada truk yang lebih pas & available - truk kecil boleh nyicil
             return `Sisa pesanan ${spbu.nama} tinggal ${sisa} ${unit}, dan armada ${better.id} [${better.name}] berkapasitas ${better.cap} ${unit} sedang tidak bertugas - cukup buat melunasi sekali jalan. Gunakan ${better.id} dulu sebelum memakai ${truck.id} [${truck.cap} ${unit}] buat kirim bertahap.`;
         }

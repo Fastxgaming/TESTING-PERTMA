@@ -12,16 +12,26 @@
 
         const HULU_SITES = {
             alpha: { nama: 'Anjungan Madura Alpha', fuel: 'oil', unit: 'Bbl', jenis: 'minyak mentah', shipType: 'BBM', icon: 'fa-oil-well', tone: 'teal',
-                     lat: -6.62, lon: 112.60, buildCost: 60e9, buildHours: 12, rate: 5000, cap: 30000, opexDay: 1.5e9, minLoad: 500 },
+                     lat: -7.39984902546815, lon: 114.02713911013367, buildCost: 48e9, buildHours: 12, rate: 5000, cap: 30000, opexWeek: 9e9, minLoad: 500 },
             bravo: { nama: 'Anjungan Madura Bravo', fuel: 'oil', unit: 'Bbl', jenis: 'minyak mentah', shipType: 'BBM', icon: 'fa-oil-well', tone: 'amber',
-                     lat: -6.45, lon: 113.30, buildCost: 110e9, buildHours: 18, rate: 9500, cap: 60000, opexDay: 2.8e9, minLoad: 500 },
+                     lat: -7.47, lon: 114.10, buildCost: 88e9, buildHours: 18, rate: 9500, cap: 60000, opexWeek: 17e9, minLoad: 500 },
             gamma: { nama: 'Anjungan Gas Madura Gamma', fuel: 'gas', unit: 'Ton', jenis: 'gas bumi (LPG Curah)', shipType: 'LPG', icon: 'fa-fire-flame-simple', tone: 'orange',
-                     lat: -6.30, lon: 113.00, buildCost: 45e9, buildHours: 12, rate: 300, cap: 2400, opexDay: 0.8e9, minLoad: 50 }
+                     lat: -7.34, lon: 113.96, buildCost: 36e9, buildHours: 12, rate: 300, cap: 2400, opexWeek: 4.8e9, minLoad: 50 }
         };
         const HULU_KEYS = Object.keys(HULU_SITES);
-        const HULU_DAY = 86400000, HULU_MAX_LVL = 3, HULU_UP = { rate: 0.30, opex: 0.20, cost: 0.5, growth: 1.6 };
+        // Koordinat di atas format Google Maps / Leaflet: lat, lon. Untuk OSRM urutannya dibalik: lon,lat
+        // (Alpha = 114.02713911013367,-7.39984902546815). Bravo & Gamma ditaruh beberapa km di sekitar Alpha.
+        // Titik-titik perantara di Laut Madura: kapal & pipa TIDAK boleh memotong daratan Jawa/Madura, jadi jalurnya
+        // dari Kilang Tuban dibelokkan lewat perairan utara Madura, ujung timur Madura, lalu turun ke selatan. Ubah kalau perlu.
+        const HULU_LANE = [[-6.62, 112.60], [-6.60, 113.45], [-6.72, 114.12], [-7.03, 114.08]];   // urutan: dari Tuban menuju anjungan
+        const huluPath = k => [[refineryData[0].lat, refineryData[0].lon], ...HULU_LANE, [HULU_SITES[k].lat, HULU_SITES[k].lon]];   // Tuban -> anjungan
+        const huluPathKm = k => { const pt = huluPath(k); let t = 0; for (let i = 1; i < pt.length; i++) t += distKm({ lat: pt[i - 1][0], lon: pt[i - 1][1] }, { lat: pt[i][0], lon: pt[i][1] }); return t; };
+        const huluPathMid = k => { const pt = huluPath(k), half = huluPathKm(k) / 2; let t = 0;
+            for (let i = 1; i < pt.length; i++) { const seg = distKm({ lat: pt[i - 1][0], lon: pt[i - 1][1] }, { lat: pt[i][0], lon: pt[i][1] }); if (t + seg >= half) { const f = (half - t) / seg; return [pt[i - 1][0] + (pt[i][0] - pt[i - 1][0]) * f, pt[i - 1][1] + (pt[i][1] - pt[i - 1][1]) * f]; } t += seg; }
+            return pt[pt.length - 1]; };
+        const HULU_DAY = 86400000, HULU_WEEK = 7 * 86400000, HULU_MAX_LVL = 3, HULU_UP = { rate: 0.30, opex: 0.20, cost: 0.5, growth: 1.6 };
         // Pipa bawah laut & kejadian acak. Biaya/tagihan dihitung dari jarak anjungan -> Kilang Tuban.
-        const HULU_PIPE = { costKm: { oil: 0.45e9, gas: 0.40e9 }, opexKm: 6e6, hoursPerKm: 0.25, capMult: 2,
+        const HULU_PIPE = { costKm: { oil: 0.13e9, gas: 0.12e9 }, opexKm: 12e6, hoursPerKm: 0.06, capMult: 2,
                             repairPct: 0.06, cleanPct: 0.025, inspectPct: 0.015, finePct: 0.01, repairHours: 6,
                             leakBase: 0.03, leakAge: 0.012, leakMax: 0.18 };   // peluang bocor/hari = dasar + umur sejak inspeksi terakhir
         const HULU_STORM = { badai: { label: 'Badai', prodMult: 0.5, color: '#a855f7' }, gelombang: { label: 'Gelombang tinggi', prodMult: 1, color: '#f59e0b' } };
@@ -33,7 +43,7 @@
         let huluSel = 'alpha';
         const hs = k => hulu.sites[k];
         const hp = k => hulu.pipes[k];
-        const pipeKm = k => distKm(HULU_SITES[k], refineryData[0]);
+        const pipeKm = k => huluPathKm(k);
         const pipeCost = k => Math.round(pipeKm(k) * HULU_PIPE.costKm[HULU_SITES[k].fuel] / 1e8) * 1e8;
         const pipeOpex = k => Math.round(pipeKm(k) * HULU_PIPE.opexKm / 1e6) * 1e6;
         const pipeHours = k => Math.ceil(pipeKm(k) * HULU_PIPE.hoursPerKm);
@@ -45,7 +55,7 @@
         const huluStormLeftMs = () => (hulu.storm.kind ? Math.max(0, hulu.storm.untilGt - gameNow()) : 0);
         const hRate = k => HULU_SITES[k].rate * (1 + HULU_UP.rate * hs(k).lvl);
         const hCap = k => Math.round(HULU_SITES[k].cap * (1 + HULU_UP.rate * hs(k).lvl));
-        const hOpex = k => Math.round(HULU_SITES[k].opexDay * (1 + HULU_UP.opex * hs(k).lvl));
+        const hOpex = k => Math.round(HULU_SITES[k].opexWeek * (1 + HULU_UP.opex * hs(k).lvl));
         const hUpCost = k => Math.round(HULU_SITES[k].buildCost * HULU_UP.cost * Math.pow(HULU_UP.growth, hs(k).lvl));
         const fmtN = v => Math.floor(v).toLocaleString('id-ID');
 
@@ -96,7 +106,7 @@
             if (!s.built) return;
             if (!s.ready) {
                 if (now < s.readyGt) return;
-                s.ready = true; s.lastGt = s.readyGt; s.opexDueGt = s.readyGt + HULU_DAY;
+                s.ready = true; s.lastGt = s.readyGt; s.opexDueGt = s.readyGt + HULU_WEEK;
                 addLog(`HULU: ${c.nama} selesai dibangun dan mulai berproduksi ±${fmtN(hRate(k))} ${c.unit}/hari.`, 'success');
                 notify(`${c.nama} selesai dibangun & mulai berproduksi!`, 'ok');
             }
@@ -106,13 +116,13 @@
                 const opex = hOpex(k);
                 if (companyCash >= opex) {
                     companyCash -= opex; totalExpense += opex;
-                    addFinanceLog(`Biaya operasional ${c.nama} (1 hari)`, -opex);
-                    s.opexDueGt += HULU_DAY; updateCashDisplay();
+                    addFinanceLog(`Biaya operasional ${c.nama} (1 minggu)`, -opex);
+                    s.opexDueGt += HULU_WEEK; updateCashDisplay();
                     if (s.shutIn) { s.shutIn = false; addLog(`HULU: ${c.nama} beroperasi lagi setelah tagihan operasional dilunasi.`, 'success'); notify(`${c.nama} beroperasi lagi.`, 'ok'); }
                 } else {
                     if (!s.shutIn) {
                         s.shutIn = true;
-                        addLog(`HULU: ${c.nama} BERHENTI PRODUKSI karena kas tidak cukup membayar operasional ${formatRupiah(opex)}/hari.`, 'warning');
+                        addLog(`HULU: ${c.nama} BERHENTI PRODUKSI karena kas tidak cukup membayar operasional ${formatRupiah(opex)}/minggu.`, 'warning');
                         notify(`${c.nama} berhenti: kas tidak cukup untuk biaya operasional.`, 'warn');
                     }
                     break;
@@ -160,7 +170,7 @@
                     </div>`;
                 }, { maxWidth: 220 });
             });
-            huluSyncPipes();
+            huluSyncPipes(); huluSyncWeather();
         }
         function huluOpen(k) { if (HULU_SITES[k]) huluSel = k; switchTab('tab-hulu'); }
         function huluPick(k) { if (HULU_SITES[k]) { huluSel = k; huluRender(); } }
@@ -170,7 +180,7 @@
             const c = HULU_SITES[k];
             if (!currentAccount || !c || hs(k).built) return;
             if (companyCash < c.buildCost) return showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(c.buildCost)} untuk membangun ${c.nama}.`, 'fa-triangle-exclamation', 'red');
-            const ok = await showConfirm(`Bangun ${c.nama} di Laut Madura seharga ${formatRupiah(c.buildCost)}? Pembangunan memakan ${c.buildHours} jam waktu game, setelah itu anjungan berproduksi ±${fmtN(c.rate)} ${c.unit}/hari ${c.jenis} dengan biaya operasional ${formatRupiah(c.opexDay)}/hari.`,
+            const ok = await showConfirm(`Bangun ${c.nama} di Laut Madura seharga ${formatRupiah(c.buildCost)}? Pembangunan memakan ${c.buildHours} jam waktu game, setelah itu anjungan berproduksi ±${fmtN(c.rate)} ${c.unit}/hari ${c.jenis} dengan biaya operasional ${formatRupiah(c.opexWeek)}/minggu.`,
                 { title: 'Bangun Anjungan', iconClass: c.icon, theme: 'blue', okLabel: 'Bangun' });
             if (!ok || hs(k).built || companyCash < c.buildCost) return;
             companyCash -= c.buildCost; totalExpense += c.buildCost;
@@ -185,8 +195,8 @@
             if (!currentAccount || !c || !s.ready || s.lvl >= HULU_MAX_LVL) return;
             const cost = hUpCost(k);
             if (companyCash < cost) return showModal('Kas Tidak Cukup', `Upgrade ${c.nama} butuh ${formatRupiah(cost)}.`, 'fa-triangle-exclamation', 'red');
-            const r2 = HULU_SITES[k].rate * (1 + HULU_UP.rate * (s.lvl + 1)), o2 = c.opexDay * (1 + HULU_UP.opex * (s.lvl + 1));
-            const ok = await showConfirm(`Upgrade ${c.nama} ke Level ${s.lvl + 1} seharga ${formatRupiah(cost)}? Produksi jadi ±${fmtN(r2)} ${c.unit}/hari, tangki ${fmtN(Math.round(c.cap * (1 + HULU_UP.rate * (s.lvl + 1))))} ${c.unit}, operasional ${formatRupiah(Math.round(o2))}/hari.`,
+            const r2 = HULU_SITES[k].rate * (1 + HULU_UP.rate * (s.lvl + 1)), o2 = c.opexWeek * (1 + HULU_UP.opex * (s.lvl + 1));
+            const ok = await showConfirm(`Upgrade ${c.nama} ke Level ${s.lvl + 1} seharga ${formatRupiah(cost)}? Produksi jadi ±${fmtN(r2)} ${c.unit}/hari, tangki ${fmtN(Math.round(c.cap * (1 + HULU_UP.rate * (s.lvl + 1))))} ${c.unit}, operasional ${formatRupiah(Math.round(o2))}/minggu.`,
                 { title: 'Upgrade Anjungan', iconClass: 'fa-arrow-up-right-dots', theme: 'blue', okLabel: 'Upgrade' });
             if (!ok || !s.ready || s.lvl >= HULU_MAX_LVL || companyCash < hUpCost(k)) return;
             huluTickSite(k); // catat produksi sampai detik ini dengan tarif lama
@@ -211,11 +221,11 @@
             return { tuban, room: Math.max(0, tuban.stok_max - tuban.stok_current), label: 'stok mentah',
                      credit: q => { tuban.stok_current = Math.round((tuban.stok_current + q) * 100) / 100; return { cur: tuban.stok_current, max: tuban.stok_max }; } };
         }
-        const huluShipCap = (k, kapal) => HULU_SITES[k].fuel === 'gas' ? kapal.cap : Math.ceil(kapal.cap * ECO.bblPerKl);
+        const huluShipCap = (k, kapal) => kapal.cap;   // kapal BBM sudah dalam Bbl, kapal LPG dalam Ton
         function huluPopulateShip() {
             const k = huluSel, sSel = document.getElementById('hulu-ship'), nSel = document.getElementById('hulu-nahkoda'), aSel = document.getElementById('hulu-abk');
             if (!sSel || !nSel || !aSel) return;
-            const prev = [sSel.value, nSel.value, aSel.value], unitKap = HULU_SITES[k].fuel === 'gas' ? 'Ton' : 'KL';
+            const prev = [sSel.value, nSel.value, aSel.value], unitKap = HULU_SITES[k].fuel === 'gas' ? 'Ton' : 'Bbl';
             sSel.innerHTML = ''; nSel.innerHTML = ''; aSel.innerHTML = '';
             huluShips(k).forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = `${t.id} [${t.plat}] - ${t.cap.toLocaleString('id-ID')} ${unitKap}`; sSel.appendChild(o); });
             companyCrew.forEach(c => {
@@ -229,7 +239,7 @@
         }
         function huluUpdateEstimate() {
             const el = document.getElementById('hulu-estimate'); if (!el) return;
-            const k = huluSel, c = HULU_SITES[k], s = hs(k), dest = huluDest(k), km = distKm(c, dest.tuban);
+            const k = huluSel, c = HULU_SITES[k], s = hs(k), dest = huluDest(k), km = huluPathKm(k);
             const kapal = companyFleet.find(t => t.id === (document.getElementById('hulu-ship') || {}).value);
             const capU = kapal ? huluShipCap(k, kapal) : 0, load = kapal ? Math.floor(Math.min(capU, s.stok, dest.room)) : 0;
             el.innerHTML = `Jarak ke ${esc(dest.tuban.nama)}: <b>±${Math.round(km)} km laut</b> &middot; estimasi <b>${fmtJam(km / AVG_SHIP_SPEED_KMH)}</b> sekali jalan.` +
@@ -273,15 +283,22 @@
                            depoNama: origin.nama, tujuanNama: tuban.nama, nomorSJ: c.fuel === 'gas' ? 'GAS BUMI' : 'MINYAK MENTAH' };
             const fit = ownAnims === 1;
             const release = () => { ids.forEach(x => busyIds.delete(x)); populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard(); huluPopulateShip(); };
+            // Pelayaran per ruas lewat titik-titik jalur laut (tidak memotong daratan). rev=false: anjungan -> Tuban.
+            const sail = async (rev, fitFirst) => {
+                const pts = huluPath(site).map(x => ({ lat: x[0], lon: x[1] })); if (!rev) pts.reverse();
+                let km = 0;
+                for (let i = 1; i < pts.length; i++) { const l = await shipLeg(pts[i - 1], pts[i], meta, fitFirst && i === 1); km += l.km; }
+                return { km };
+            };
             try {
-                const leg = await shipLeg(origin, tuban, meta, fit);
+                const leg = await sail(false, fit);
                 addLog(`SANDAR: Kapal ${truck.id} tiba di ${tuban.nama} (±${Math.round(leg.km)} km laut), kru bongkar ${c.jenis} (±${UNLOAD_SECONDS_KAPAL} detik)...`, 'info', 'truck');
                 notify(`${truck.id} sandar di ${tuban.nama}, bongkar ${c.jenis}...`, 'info');
                 ownAnims = Math.max(0, ownAnims - 1);
                 await pausableDelay(UNLOAD_SECONDS_KAPAL * 1000);
                 completeHuluTransfer(d);
                 try {
-                    await shipLeg(tuban, origin, meta, false);
+                    await sail(true, false);
                     addLog(`Kapal ${truck.id} [Nahkoda: ${driver.name}] kembali berlabuh di ${c.nama}.`, 'info', 'truck');
                 } catch (e) { /* animasi pulang gagal, tidak mempengaruhi stok yang sudah masuk */ }
                 release();
@@ -344,7 +361,7 @@
             const nama = 'Pipa ' + c.nama;
             if (!p.ready) {
                 if (now < p.readyGt) return;
-                p.ready = true; p.lastGt = p.readyGt; p.opexDueGt = p.readyGt + HULU_DAY; p.inspectGt = p.readyGt;
+                p.ready = true; p.lastGt = p.readyGt; p.opexDueGt = p.readyGt + HULU_WEEK; p.inspectGt = p.readyGt;
                 addLog(`HULU: ${nama} selesai dibangun dan mulai mengalirkan ${c.jenis} ke Kilang Tuban (maks ±${fmtN(pipeCap(k))} ${c.unit}/hari).`, 'success');
                 notify(`${nama} selesai dan mulai mengalir!`, 'ok');
             }
@@ -362,13 +379,13 @@
                 const opex = pipeOpex(k);
                 if (companyCash >= opex) {
                     companyCash -= opex; totalExpense += opex;
-                    addFinanceLog(`Perawatan ${nama} (1 hari)`, -opex);
-                    p.opexDueGt += HULU_DAY; updateCashDisplay();
+                    addFinanceLog(`Perawatan ${nama} (1 minggu)`, -opex);
+                    p.opexDueGt += HULU_WEEK; updateCashDisplay();
                     if (p.unpaid) { p.unpaid = false; addLog(`HULU: ${nama} mengalir lagi setelah biaya perawatan dilunasi.`, 'success'); notify(`${nama} mengalir lagi.`, 'ok'); }
                 } else {
                     if (!p.unpaid) {
                         p.unpaid = true;
-                        addLog(`HULU: ${nama} DIHENTIKAN karena kas tidak cukup membayar perawatan ${formatRupiah(opex)}/hari.`, 'warning');
+                        addLog(`HULU: ${nama} DIHENTIKAN karena kas tidak cukup membayar perawatan ${formatRupiah(opex)}/minggu.`, 'warning');
                         notify(`${nama} berhenti: kas tidak cukup untuk perawatan.`, 'warn');
                     }
                     break;
@@ -430,10 +447,10 @@
                 huluPipeSig[k] = sig;
                 if (!p.built) return;
                 const col = info.key === 'l' ? '#ef4444' : info.key === 'x' || info.key === 'b' ? '#f59e0b' : info.key === 'u' ? '#94a3b8' : (c.fuel === 'gas' ? '#fb923c' : '#2dd4bf');
-                huluPipeLines[k] = L.polyline([[c.lat, c.lon], [tuban.lat, tuban.lon]], { color: col, weight: 3, opacity: 0.9, dashArray: info.key === 'r' ? null : '6 6' }).addTo(map);
+                huluPipeLines[k] = L.polyline(huluPath(k), { color: col, weight: 3, opacity: 0.9, dashArray: info.key === 'r' ? null : '6 6' }).addTo(map);
                 huluPipeLines[k].bindTooltip(`Pipa ${c.nama} - ${info.label}`, { sticky: true });
                 if (info.key === 'l' || info.key === 'x') {
-                    huluPipeLeakMk[k] = L.marker([(c.lat + tuban.lat) / 2, (c.lon + tuban.lon) / 2], {
+                    huluPipeLeakMk[k] = L.marker(huluPathMid(k), {
                         icon: L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 12],
                             html: `<div style="width:24px;height:24px;border-radius:50%;background:#ef4444;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.5)"><i class="fa-solid fa-droplet"></i></div>` }),
                         zIndexOffset: 650 }).addTo(map);
@@ -448,7 +465,7 @@
             if (!currentAccount || !c || !hs(k).ready || p.built) return;
             const cost = pipeCost(k), hrs = pipeHours(k);
             if (companyCash < cost) return showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(cost)} untuk membangun pipa bawah laut dari ${c.nama}.`, 'fa-triangle-exclamation', 'red');
-            const ok = await showConfirm(`Bangun pipa bawah laut ±${Math.round(pipeKm(k))} km dari ${c.nama} ke Kilang Tuban seharga ${formatRupiah(cost)}? Pembangunan ${hrs} jam waktu game. Setelah jadi, ${c.jenis} mengalir otomatis (maks ${fmtN(pipeCap(k))} ${c.unit}/hari) tanpa kapal & kru, kebal cuaca buruk, dengan perawatan ${formatRupiah(pipeOpex(k))}/hari. Risiko: pipa bisa bocor secara acak.`,
+            const ok = await showConfirm(`Bangun pipa bawah laut ±${Math.round(pipeKm(k))} km dari ${c.nama} ke Kilang Tuban seharga ${formatRupiah(cost)}? Pembangunan ${hrs} jam waktu game. Setelah jadi, ${c.jenis} mengalir otomatis (maks ${fmtN(pipeCap(k))} ${c.unit}/hari) tanpa kapal & kru, kebal cuaca buruk, dengan perawatan ${formatRupiah(pipeOpex(k))}/minggu. Risiko: pipa bisa bocor secara acak.`,
                 { title: 'Bangun Pipa Bawah Laut', iconClass: 'fa-grip-lines', theme: 'blue', okLabel: 'Bangun' });
             if (!ok || hp(k).built || !hs(k).ready || companyCash < cost) return;
             companyCash -= cost; totalExpense += cost;
@@ -486,11 +503,36 @@
         }
 
         // ---------- Tampilan tab "Anjungan Hulu" ----------
+        // Status cuaca Laut Madura tampil di PETA: badge kecil (kanan atas) + lingkaran warna di atas area terdampak saat cuaca buruk.
+        let huluWeatherCtl = null, huluWeatherEl = null, huluWeatherCircle = null, huluWeatherHtmlLast = '', huluWeatherKindLast = null;
         function huluWeatherHtml() {
             const st = hulu.storm;
-            if (!st.kind) return `<i class="fa-solid fa-sun text-emerald-400 mr-1.5"></i>Cuaca Laut Madura: <b class="text-emerald-300">cerah/aman</b>. Kapal boleh berlayar.`;
+            if (!st.kind) return `<div style="font-weight:700;color:#34d399"><i class="fa-solid fa-sun" style="margin-right:6px"></i>Laut Madura: cerah</div><div style="opacity:.75">Kapal boleh berlayar</div>`;
             const w = HULU_STORM[st.kind];
-            return `<i class="fa-solid fa-cloud-bolt mr-1.5" style="color:${w.color}"></i><b style="color:${w.color}">${w.label}</b> di Laut Madura, reda dalam ±${fmtJam(huluStormLeftMs() / 3600000)} game. Kapal dilarang berlayar${st.kind === 'badai' ? ', produksi anjungan turun 50%' : ''}. Pipa tidak terpengaruh.`;
+            return `<div style="font-weight:700;color:${w.color}"><i class="fa-solid fa-cloud-bolt" style="margin-right:6px"></i>${w.label} di Laut Madura</div>
+                <div>Reda ±${fmtJam(huluStormLeftMs() / 3600000)} game</div>
+                <div style="opacity:.75">Kapal dilarang berlayar${st.kind === 'badai' ? ' &middot; produksi anjungan -50%' : ''}. Pipa aman.</div>`;
+        }
+        function huluSyncWeather() {
+            if (typeof map === 'undefined' || !map || typeof L === 'undefined') return;
+            if (!huluWeatherCtl) {
+                huluWeatherCtl = L.control({ position: 'topright' });
+                huluWeatherCtl.onAdd = () => {
+                    huluWeatherEl = L.DomUtil.create('div', '');
+                    huluWeatherEl.style.cssText = 'background:rgba(17,24,39,.92);color:#e5e7eb;border:1px solid #374151;border-radius:10px;padding:6px 9px;font:11px/1.35 system-ui,sans-serif;max-width:190px;box-shadow:0 2px 8px rgba(0,0,0,.4)';
+                    L.DomEvent.disableClickPropagation(huluWeatherEl);
+                    return huluWeatherEl;
+                };
+                huluWeatherCtl.addTo(map);
+            }
+            const html = huluWeatherHtml();
+            if (huluWeatherEl && html !== huluWeatherHtmlLast) { huluWeatherEl.innerHTML = html; huluWeatherHtmlLast = html; }
+            const kind = hulu.storm.kind;
+            if (kind !== huluWeatherKindLast) {
+                huluWeatherKindLast = kind;
+                if (huluWeatherCircle) { map.removeLayer(huluWeatherCircle); huluWeatherCircle = null; }
+                if (kind) huluWeatherCircle = L.circle([-6.95, 113.3], { radius: 170000, color: HULU_STORM[kind].color, weight: 2, opacity: 1, fillColor: HULU_STORM[kind].color, fillOpacity: 0.38, interactive: false }).addTo(map);
+            }
         }
         function huluPipeHtml(k) {
             const c = HULU_SITES[k], s = hs(k), p = hp(k);
@@ -502,7 +544,7 @@
                 body = `<p class="text-[11px] text-gray-400 mb-2.5">Mengalirkan ${c.jenis} otomatis dari tangki anjungan ke Tuban tanpa kapal & kru, dan tidak terganggu cuaca buruk. Risikonya: pipa bisa bocor acak dan harus diperbaiki.</p>
                     <div class="grid grid-cols-2 gap-2 text-[10px] mb-3">${chip('Panjang', '±' + Math.round(pipeKm(k)) + ' km', 'text-sky-400')}${chip('Biaya Bangun', formatRupiah(pipeCost(k)), 'text-amber-400')}
                         ${chip('Waktu Bangun', pipeHours(k) + ' jam game', 'text-sky-400')}${chip('Kapasitas Alir', fmtN(pipeCap(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}
-                        ${chip('Perawatan', formatRupiah(pipeOpex(k)) + '/hari', 'text-red-400')}${chip('Risiko Bocor Dasar', (HULU_PIPE.leakBase * 100).toFixed(1).replace('.', ',') + '%/hari', 'text-orange-400')}</div>
+                        ${chip('Perawatan', formatRupiah(pipeOpex(k)) + '/minggu', 'text-red-400')}${chip('Risiko Bocor Dasar', (HULU_PIPE.leakBase * 100).toFixed(1).replace('.', ',') + '%/hari', 'text-orange-400')}</div>
                     <button onclick="huluPipeBuild('${k}')" class="w-full bg-sky-700 hover:bg-sky-600 text-white font-bold py-2.5 rounded-xl text-xs transition"><i class="fa-solid fa-hammer mr-1.5"></i>Bangun Pipa Bawah Laut</button>`;
             } else if (!p.ready) {
                 body = `<div class="text-[11px] text-gray-300 mb-1.5">Pemasangan pipa berlangsung...</div><div id="pipe-build-bar">${huluBar(0, 'bg-amber-500')}</div><div id="pipe-build-left" class="text-[10px] text-gray-400 mt-1.5"></div>`;
@@ -514,7 +556,7 @@
                 else act = `<button onclick="huluPipeInspect('${k}')" class="w-full mt-3 bg-sky-800 hover:bg-sky-700 text-white font-bold py-2 rounded-xl text-xs transition"><i class="fa-solid fa-magnifying-glass mr-1.5"></i>Inspeksi Pipa (${formatRupiah(pipeInspectCost(k))})</button>
                     <div class="text-[9px] text-gray-500 mt-1">Inspeksi mengembalikan risiko bocor ke level dasar. Makin lama tidak diinspeksi, makin besar risikonya.</div>`;
                 body = `<div class="flex items-center gap-2 text-[11px] mb-2"><span id="pipe-status" class="font-bold text-gray-200"></span></div>
-                    <div class="grid grid-cols-2 gap-2 text-[10px]">${chip('Kapasitas Alir', fmtN(pipeCap(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Perawatan', formatRupiah(pipeOpex(k)) + '/hari', 'text-red-400')}
+                    <div class="grid grid-cols-2 gap-2 text-[10px]">${chip('Kapasitas Alir', fmtN(pipeCap(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Perawatan', formatRupiah(pipeOpex(k)) + '/minggu', 'text-red-400')}
                         ${chip('Total Dialirkan', '', 'text-sky-400', 'pipe-flowed')}${chip('Tagihan Berikut', '', 'text-amber-400', 'pipe-due')}
                         ${chip('Risiko Bocor', '', 'text-orange-400', 'pipe-risk')}${chip('Jumlah Kebocoran', '', 'text-gray-300', 'pipe-leaks')}</div>${act}`;
             }
@@ -522,7 +564,6 @@
         }
         function huluRefreshPipeUi(k) {
             const p = hp(k), c = HULU_SITES[k], set = (id, v) => { const e = document.getElementById(id); if (e) e.innerHTML = v; };
-            const w = document.getElementById('hulu-weather'); if (w) w.innerHTML = huluWeatherHtml();
             if (p.built && !p.ready) {
                 const left = Math.max(0, p.readyGt - gameNow()), total = pipeHours(k) * 3600000;
                 set('pipe-build-bar', huluBar((1 - left / total) * 100, 'bg-amber-500'));
@@ -553,9 +594,9 @@
             let body = '';
             if (!s.built) {
                 body = `<div class="grid grid-cols-2 gap-2 text-[10px] mb-3">${chip('Biaya Bangun', formatRupiah(c.buildCost), 'text-amber-400')}${chip('Waktu Bangun', c.buildHours + ' jam game', 'text-sky-400')}
-                        ${chip('Produksi', fmtN(c.rate) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Operasional', formatRupiah(c.opexDay) + '/hari', 'text-red-400')}</div>
+                        ${chip('Produksi', fmtN(c.rate) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Operasional', formatRupiah(c.opexWeek) + '/minggu', 'text-red-400')}</div>
                     <button onclick="huluBuild('${k}')" class="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 rounded-xl text-xs transition"><i class="fa-solid fa-hammer mr-1.5"></i>Bangun Anjungan</button>
-                    <div class="text-[9px] text-gray-500 mt-2"><i class="fa-solid fa-circle-info mr-1"></i>1 hari game = 48 menit nyata. ${c.fuel === 'gas' ? `Gas diangkut kapal Tanker LPG dan masuk sebagai LPG Curah Tuban (harga beli ${formatRupiah(PRODUCT_META.lpg_curah.buyPrice)}/Ton).` : `Biaya pokok minyak sendiri jauh di bawah harga beli (${formatRupiah(BBL_PRICE)}/Bbl), tapi modalnya besar dan butuh kapal tanker.`}</div>`;
+                    <div class="text-[9px] text-gray-500 mt-2"><i class="fa-solid fa-circle-info mr-1"></i>1 hari game = 48 menit nyata, 1 minggu game = ±5,6 jam nyata (operasional ditagih tiap minggu game). ${c.fuel === 'gas' ? `Gas diangkut kapal Tanker LPG dan masuk sebagai LPG Curah Tuban (harga beli ${formatRupiah(PRODUCT_META.lpg_curah.buyPrice)}/Ton).` : `Biaya pokok minyak sendiri jauh di bawah harga beli (${formatRupiah(BBL_PRICE)}/Bbl), tapi modalnya besar dan butuh kapal tanker.`}</div>`;
             } else if (!s.ready) {
                 body = `<div class="text-[11px] text-gray-300 mb-1.5">Pembangunan berlangsung...</div><div id="hulu-build-bar">${huluBar(0, 'bg-amber-500')}</div><div id="hulu-build-left" class="text-[10px] text-gray-400 mt-1.5"></div>`;
             } else {
@@ -565,7 +606,7 @@
                        <div class="text-[9px] text-gray-500 mt-1">Tiap level: produksi &amp; tangki +${Math.round(HULU_UP.rate * 100)}%, operasional +${Math.round(HULU_UP.opex * 100)}% dari nilai dasar.</div>`;
                 body = `<div class="flex justify-between text-[11px] mb-1"><span class="text-gray-400">Tangki penampung anjungan</span><b id="hulu-stok-txt" class="text-gray-200 font-mono"></b></div>
                     <div id="hulu-stok-bar">${huluBar(0, 'bg-teal-500')}</div>
-                    <div class="grid grid-cols-2 gap-2 text-[10px] mt-3">${chip('Produksi', fmtN(hRate(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Operasional', formatRupiah(hOpex(k)) + '/hari', 'text-red-400')}
+                    <div class="grid grid-cols-2 gap-2 text-[10px] mt-3">${chip('Produksi', fmtN(hRate(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Operasional', formatRupiah(hOpex(k)) + '/minggu', 'text-red-400')}
                         ${chip('Total Diproduksi', '', 'text-sky-400', 'hulu-produced')}${chip('Tagihan Berikut', '', 'text-amber-400', 'hulu-due')}</div>${up}`;
             }
             let ship = '';
@@ -583,7 +624,6 @@
                     </div></div>`;
             }
             root.innerHTML = `<div class="space-y-4">
-                <div id="hulu-weather" class="rounded-xl border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">${huluWeatherHtml()}</div>
                 <div class="grid grid-cols-3 gap-2">${cards}</div>
                 <div class="bg-gray-950 p-3.5 rounded-xl border border-gray-800 shadow border-t-2 border-t-${c.tone}-500">
                     <h3 class="text-xs font-bold text-${c.tone}-400 uppercase tracking-wider mb-1 flex items-center"><i class="fa-solid ${c.icon} mr-2"></i> ${esc(c.nama)}</h3>

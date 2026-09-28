@@ -13,11 +13,14 @@
             { list: 'dealer-lpg-bulk-list', type: 'LPG', name: 'Skid Tank LPG 20 Ton Trailer', short: 'Skid Tank Trailer (20 Ton)', cap: 20, price: 2400000000, engine: 'Kepala Trailer Diesel 6 Silinder 400 PS', axle: 'Semi-Trailer (18 Roda)', capText: '20 Ton LPG Curah (Pressure Vessel)' },
 
             // --- Kapal Tanker (khusus transfer Kilang Pusat <-> Depo Cabang yang punya akses pelabuhan) ---
-            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'Kapal Tanker BBM 500 KL', short: 'Tanker Kecil (500 KL)', cap: 500, price: 8500000000, engine: 'Marine Diesel 1200 HP', axle: 'Kapal Tanker Pelayaran Pantai', capText: '500.000 Liter · Tanker Curah' },
-            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'Kapal Tanker BBM 1.500 KL', short: 'Tanker Sedang (1.500 KL)', cap: 1500, price: 21000000000, engine: 'Marine Diesel 2400 HP', axle: 'Kapal Tanker Pelayaran Nusantara', capText: '1.500.000 Liter · Tanker Curah' },
-            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'Kapal Tanker BBM 3.000 KL', short: 'Tanker Besar (3.000 KL)', cap: 3000, price: 38000000000, engine: 'Marine Diesel 4000 HP', axle: 'Kapal Tanker Pelayaran Nusantara', capText: '3.000.000 Liter · Tanker Curah' },
-            { list: 'dealer-kapal-lpg-list', type: 'LPG', kelas: 'kapal', name: 'Kapal Tanker LPG 300 Ton', short: 'LPG Carrier Kecil (300 Ton)', cap: 300, price: 12000000000, engine: 'Marine Diesel 1600 HP', axle: 'Kapal LPG Carrier Pressurized', capText: '300 Ton LPG Curah' },
-            { list: 'dealer-kapal-lpg-list', type: 'LPG', kelas: 'kapal', name: 'Kapal Tanker LPG 800 Ton', short: 'LPG Carrier Besar (800 Ton)', cap: 800, price: 27000000000, engine: 'Marine Diesel 3200 HP', axle: 'Kapal LPG Carrier Pressurized', capText: '800 Ton LPG Curah' },
+            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'Tanker Pesisir 50.000 Bbl (Coastal)', short: 'Coastal Tanker (50.000 Bbl)', cap: 50000, price: 10000000000, engine: 'Marine Diesel 2.400 HP', axle: 'Coastal Tanker · di bawah 50.000 DWT (antar-pulau/pantai)', capText: '50.000 Bbl · Tanker Curah Pesisir' },
+            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'MR Tanker Nusa Sagara 250.000 Bbl', short: 'MR / GP Tanker (250.000 Bbl)', cap: 250000, price: 50000000000, engine: 'Marine Diesel 8.000 HP', axle: 'Medium Range / General Purpose · 17.000–45.000 DWT', capText: '250.000 Bbl · Tanker Curah MR/GP' },
+            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'Aframax MT Galunggong 500.000 Bbl', short: 'Aframax / LR2 (500.000 Bbl)', cap: 500000, price: 150000000000, engine: 'Marine Diesel 14.000 HP', axle: 'Large Range / Aframax · 80.000–120.000 DWT', capText: '500.000 Bbl · Tanker Curah Aframax' },
+            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'Suezmax Permatina Halmahera 800.000 Bbl', short: 'Suezmax (800.000 Bbl)', cap: 800000, price: 300000000000, engine: 'Marine Diesel 18.000 HP', axle: 'Suezmax · 125.000–156.000 DWT', capText: '800.000 Bbl · Tanker Curah Suezmax' },
+            { list: 'dealer-kapal-bbm-list', type: 'BBM', kelas: 'kapal', name: 'VLCC Pertamini Pride 2.000.000 Bbl', short: 'VLCC (2.000.000 Bbl)', cap: 2000000, price: 500000000000, engine: 'Marine Diesel 30.000 HP', axle: 'Very Large Crude Carrier · 300.000+ DWT', capText: '2.000.000 Bbl · Tanker Minyak Mentah Raksasa' },
+            { list: 'dealer-kapal-lpg-list', type: 'LPG', kelas: 'kapal', name: 'Small LPG Gas Antasenu 3.000 Ton', short: 'Small LPG (3.000 Ton)', cap: 3000, price: 15000000000, engine: 'Marine Diesel 3.500 HP', axle: 'Small LPG Carrier · 1.700–3.800 MT (2.000–4.000 CBM)', capText: '3.000 Ton LPG Curah · Kapal Kecil (pelabuhan kecil/antar-pulau)' },
+            { list: 'dealer-kapal-lpg-list', type: 'LPG', kelas: 'kapal', name: 'Midsize LPG Gas Widuro 15.000 Ton', short: 'Midsize LPG (15.000 Ton)', cap: 15000, price: 100000000000, engine: 'Marine Diesel 9.000 HP', axle: 'Midsize LPG Carrier · 15.000–17.400 MT', capText: '15.000 Ton LPG Curah · Kapal Menengah (rute regional)' },
+            { list: 'dealer-kapal-lpg-list', type: 'LPG', kelas: 'kapal', name: 'VLGC PIZ Prolifik 40.000 Ton', short: 'VLGC (40.000 Ton)', cap: 40000, price: 400000000000, engine: 'Marine Diesel 22.000 HP', axle: 'Very Large Gas Carrier · 56.000–91.000 CBM', capText: '40.000 Ton LPG Curah · Kapal Raksasa (VLGC)' },
             // --- LPG tabung: Truk distribusi agen/SPBE ---
             { list: 'dealer-lpg-agent-list', type: 'LPG', name: 'Truk Agen Tabung 3 Kg (Oranye)', short: 'Agen Tabung 3 Kg (3 Ton)', cap: 3, price: 380000000, engine: 'Diesel 4 Silinder 110 PS', axle: '2 Sumbu (6 Roda)', capText: '3 Ton Tabung LPG 3 Kg' },
             { list: 'dealer-lpg-agent-list', type: 'LPG', name: 'Truk Agen LPG 12 Kg (Biru)', short: 'Agen LPG 12 Kg (4 Ton)', cap: 4, price: 420000000, engine: 'Diesel 4 Silinder 130 PS', axle: '2 Sumbu (6 Roda)', capText: '4 Ton Tabung LPG 12 Kg' },
@@ -25,8 +28,8 @@
         ];
 
         // Biaya legalitas saat beli: uji KIR baru + STNK/BBN + pelat nomor (TNKB)
-        const regFee = u => { const kir = Math.round((1200000 + u.cap * 150000) / 100000) * 100000, stnk = Math.round(u.price * 0.03 / 100000) * 100000, plat = 500000; return { kir, stnk, plat, total: kir + stnk + plat }; };
-        const kirRenewCost = t => Math.round(regFee({ cap: t.cap, price: t.price || 500e6 }).kir * 0.6 / 50000) * 50000;
+        const regFee = u => { const kir = u.kelas === 'kapal' ? Math.round(u.price * 0.005 / 100000) * 100000 : Math.round((1200000 + u.cap * 150000) / 100000) * 100000, stnk = Math.round(u.price * 0.03 / 100000) * 100000, plat = 500000; return { kir, stnk, plat, total: kir + stnk + plat }; };
+        const kirRenewCost = t => Math.round(regFee({ cap: t.cap, price: t.price || 500e6, kelas: t.kelas }).kir * 0.6 / 50000) * 50000;
         const stnkRenewCost = t => Math.round((t.price || 500e6) * 0.02 / 100000) * 100000;
         const platRenewCost = t => 500000;
         const STNK_PERIOD = 5 * 365 * 86400000; // STNK berlaku 5 tahun
