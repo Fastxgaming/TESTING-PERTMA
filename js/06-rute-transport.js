@@ -158,9 +158,10 @@
             const f = FUELS.find(x => x.label === jenisMuatan);
             return f ? f.id : null;
         }
-        // Perbarui fase perjalanan ('berangkat'|'tiba'|'bongkar') pada pesanan SPBU terkait sebuah pengiriman,
+        // Perbarui fase perjalanan ('muat'|'berangkat'|'tiba'|'bongkar') pada pesanan SPBU terkait sebuah pengiriman,
         // kalau pesanannya masih ada & masih terbuka. Dipanggil dari animateDelivery saat truk tiba & mulai bongkar.
         function updateOrderTahap(spbu, truck, jenisMuatan, tahap) {
+            truckFase.set(truck.id, tahap); // dipakai bar status armada & penanda unit di tab Pesanan SPBU
             const fuelId = orderFuelIdFor(truck, jenisMuatan);
             const o = fuelId ? orders.find(x => x.kode === spbu.kode && x.fuel === fuelId && x.status === 'open') : null;
             if (o) { o.tahap = tahap; renderOrders(); }
@@ -178,7 +179,12 @@
                 else d.origin.stok_current = Math.max(0, d.origin.stok_current - stokNeed(d.origin, truck.cap)); // fallback lama, jaga-jaga kalau kapKey tidak ada
                 renderRefineries();
             }
-            else if (truck.type === 'LPG') { const hpp = truck.cap * ECO.hppTon; companyCash -= hpp; totalExpense += hpp; bbmSpent += hpp; addFinanceLog(`Pembelian LPG ${truck.cap} Ton (${spbu.nama})`, -hpp); updateCashDisplay(); }
+            else if (truck.type === 'LPG' && d.origin) {
+                // Pesanan LPG SPBU mengambil dari tangki LPG TABUNG kilang/depo asal (bukan beli dari pemasok lagi).
+                const slot = d.origin.kap && d.origin.kap.lpg_tabung;
+                if (slot) slot.cur = Math.max(0, Math.round((slot.cur - truck.cap) * 100) / 100);
+                renderRefineries();
+            }
 
             // BUG FIX: pesanan SPBU terkait (kalau ada) langsung ditandai "Proses - Berangkat" begitu truk resmi
             // dikirim, supaya SEKETIKA hilang dari daftar Pesanan terbuka (bukan nyangkut di sana sampai truk
@@ -193,14 +199,14 @@
             if (orderTerkait) {
                 const sisaSebelumKirim = orderTerkait.kl - orderTerkait.terkirim - (orderTerkait.inTransit || 0);
                 orderTerkait.inTransit = (orderTerkait.inTransit || 0) + truck.cap;
-                orderTerkait.tahap = 'berangkat';
+                orderTerkait.tahap = 'muat';
                 if (!orderTerkait.lockedTruckId && truck.cap < sisaSebelumKirim) orderTerkait.lockedTruckId = truck.id;
             }
 
             animateDelivery(d);
             renderOrders();
-            addLog(`SURAT JALAN ${nomorSJ}: Armada ${truck.id} [Supir: ${driver.name}] DITANDATANGANI & BERANGKAT membawa ${jenisMuatan} ke ${spbu.nama}.`, 'info', 'truck');
-            showModal('Truk Berangkat', `Surat Jalan ${nomorSJ} telah ditandatangani. Truk ${truck.id} resmi berangkat membawa ${jenisMuatan} ke ${spbu.nama}.\nPendapatan akan cair otomatis setelah truk tiba di tujuan dan kru selesai bongkar muatan (±${UNLOAD_SECONDS} detik setelah tiba).`, 'fa-truck-fast', 'blue');
+            addLog(`SURAT JALAN ${nomorSJ}: Armada ${truck.id} [Supir: ${driver.name}] DITANDATANGANI. Kru mulai memuat ${jenisMuatan} untuk ${spbu.nama} (±${LOAD_SECONDS} detik) sebelum berangkat.`, 'info', 'truck');
+            showModal('Proses Muat Dimulai', `Surat Jalan ${nomorSJ} telah ditandatangani. Kru memuat ${jenisMuatan} ke truk ${truck.id} (±${LOAD_SECONDS} detik), lalu truk berangkat ke ${spbu.nama}.\nPendapatan akan cair otomatis setelah truk tiba di tujuan dan kru selesai bongkar muatan (±${UNLOAD_SECONDS} detik setelah tiba).`, 'fa-truck-ramp-box', 'blue');
         }
 
         // DISPATCH LPG
@@ -228,12 +234,17 @@
             if (lockMsgLpg) return showModal('Pesanan Terkunci', lockMsgLpg, 'fa-lock', 'red');
             const sizeMsg = truckSizeBlock(spbu, 'lpg', truck, 'LPG');
             if (sizeMsg) return showModal('Pakai Armada yang Lebih Pas', sizeMsg, 'fa-truck-ramp-box', 'red');
-            const hpp = truck.cap * ECO.hppTon;
-            if (companyCash < hpp) return showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(hpp)} untuk membeli ${truck.cap} Ton LPG dari pemasok.`, 'fa-triangle-exclamation', 'red');
+            const origin = pickOrigin('LPG', spbu, truck.cap, truck, 'lpg_tabung');
+            if (!origin) return showModal('Stok LPG Tabung Kurang', `Tidak ada kilang/depo aktif dengan stok LPG Tabung cukup untuk ${truck.cap} Ton. Konversi LPG Curah jadi LPG Tabung di tab Kilang (tombol Konversi), atau transfer stok LPG ke depo.`, 'fa-fire-flame-simple', 'red');
 
-            const d = { spbu, truck, driver, kernet, jenisMuatan: lpgType, hargaPerUnit: ECO.jualTon };
+            const d = { spbu, truck, driver, kernet, origin, jenisMuatan: lpgType, kapKey: 'lpg_tabung', hargaPerUnit: ECO.jualTon };
             openSuratJalanModal({ mode: 'LPG', tujuanNama: spbu.nama, tujuanKode: spbu.kode, jenisMuatan: lpgType, volumeText: `${truck.cap} Ton`, truck, driver, kernet,
-                execute: (no) => settleTruckDelivery(no, d) });
+                execute: (no) => {
+                    // Stok bisa berubah selama surat jalan dibuka: cek ulang sebelum berangkat.
+                    const sl = origin.kap && origin.kap.lpg_tabung;
+                    if (!sl || sl.cur < truck.cap) return showModal('Stok LPG Tabung Kurang', `Stok LPG Tabung ${origin.nama} tidak cukup untuk ${truck.cap} Ton.`, 'fa-triangle-exclamation', 'red');
+                    settleTruckDelivery(no, d);
+                } });
         }
 
         const ctx = document.getElementById('chartSupply').getContext('2d');
@@ -265,6 +276,7 @@
         let activeAnims = 0;
         const TRUCK_COLOR = { BBM: '#10b981', LPG: '#f59e0b' };
         const AVG_TRUCK_SPEED_KMH = 45; // estimasi kecepatan rata-rata truk tangki di jalan (termasuk berhenti/istirahat), mendekati perkiraan Google Maps utk kendaraan besar
+        const LOAD_SECONDS = 25; // waktu nyata (detik) kru memuat kargo di kilang/depo asal setelah surat jalan ditandatangani, sebelum truk berangkat (pasangan dari fase bongkar muat)
         const UNLOAD_SECONDS = 35; // waktu nyata (detik) kru bongkar muatan setelah truk tiba, sebelum pendapatan cair - dinaikkan dari 20 detik biar fase "Bongkar Muat" terasa (tidak sekejap saja)
         // Catatan: GAME_SPEED dideklarasikan lebih bawah di file ini; dipakai di dalam fungsi (bukan di top-level) agar sudah terisi saat dipanggil.
 
@@ -333,7 +345,7 @@
             const fuelSel = document.getElementById(prefix + '-fuel-type');
             const fBBMPrev = fuelSel && FUELS.find(x => x.label === fuelSel.value);
             const kapKeyPrev = fBBMPrev && FUEL_KAP_KEY[fBBMPrev.id];
-            const origin = pickOrigin(truck.type, spbu, truck.cap, truck, kapKeyPrev);
+            const origin = pickOrigin(truck.type, spbu, truck.cap, truck, truck.type === 'LPG' ? 'lpg_tabung' : kapKeyPrev);
             if (!origin) {
                 box.innerHTML = '<span class="text-amber-400">Tidak ditemukan kilang/depo asal yang cocok untuk kombinasi ini.</span>';
                 return;
@@ -366,7 +378,8 @@
             const biayaKirimDasar = Math.round(truck.cap * (truck.type === 'LPG' ? ECO.biayaKirimTon : ECO.biayaKirimKl));
             const kmPP = kmEfektif * 2;
             const totalPP = biayaBbm * 2;
-            const totalBiayaEstimasi = biayaKirimDasar + totalPP;
+            const biayaAsuransi = Math.round(revenueDasar * ECO.asuransiPersen); // premi asuransi pengantaran = % dari nilai muatan
+            const totalBiayaEstimasi = biayaKirimDasar + totalPP + biayaAsuransi;
             const revenueBersihEstimasi = revenueKotor - totalBiayaEstimasi;
 
             box.innerHTML = `
@@ -379,6 +392,7 @@
                 <div class="flex justify-between"><span>Pendapatan Kotor</span><span class="text-emerald-400 font-mono">${formatRupiah(revenueKotor)}</span></div>
                 <div class="flex justify-between"><span>Biaya Kirim Dasar</span><span class="text-red-400 font-mono">-${formatRupiah(biayaKirimDasar)}</span></div>
                 <div class="flex justify-between"><span>Biaya BBM Solar Truk (PP, &plusmn;${Math.round(kmPP)} km)</span><span class="text-red-400 font-mono">-${formatRupiah(totalPP)}</span></div>
+                <div class="flex justify-between"><span>Asuransi Pengantaran (${Math.round(ECO.asuransiPersen * 100)}% nilai muatan)</span><span class="text-red-400 font-mono">-${formatRupiah(biayaAsuransi)}</span></div>
                 <div class="flex justify-between border-t border-gray-800 mt-1 pt-1"><span class="font-bold text-gray-300">Estimasi Pendapatan Bersih</span><span class="font-bold ${revenueBersihEstimasi >= 0 ? 'text-emerald-300' : 'text-red-400'} font-mono">${formatRupiah(revenueBersihEstimasi)}</span></div>
                 <div class="text-[9px] text-gray-500 pt-0.5">*Belum termasuk bonus pesanan (bisa nambah) atau denda pelanggaran dokumen (bisa mengurangi) - baru pasti setelah truk tiba &amp; bongkar muatan.</div>`;
         }
@@ -485,7 +499,7 @@
             // jika tangki produk jadi jenis ITU (kap[kapKey].cur) mencukupi - bukan stok BBL mentah (stok_current),
             // karena BBL mentah & BBM jadi per-jenis adalah dua pool stok yang berbeda.
             const cukupBBM = k => !kapKey ? k.stok_current >= stokNeed(k, cap) : !!(k.kap && k.kap[kapKey] && k.kap[kapKey].cur >= cap);
-            const ok = refineryData.filter(k => k.is_unlocked && (k.tipe.includes('Pusat') || k.tipe.includes(type)) && (!cap || type !== 'BBM' || cukupBBM(k)));
+            const ok = refineryData.filter(k => k.is_unlocked && (k.tipe.includes('Pusat') || k.tipe.includes(type)) && (!cap || (type === 'BBM' ? cukupBBM(k) : (type === 'LPG' && kapKey) ? !!(k.kap && k.kap[kapKey] && k.kap[kapKey].cur >= cap) : true)));
             // Utamakan kilang/depo yang jadi "wilayah" (radius terdekat) SPBU ini UNTUK JENIS PRODUK INI -
             // lihat recomputeWilayah(). Dipisah per jenis (BBM/LPG) karena depo cabang bisa cuma khusus salah satunya.
             const wilayahId = type === 'LPG' ? spbu.wilayahLpgId : spbu.wilayahBbmId;

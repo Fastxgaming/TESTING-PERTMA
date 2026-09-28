@@ -186,17 +186,54 @@
         }
 
         // ===== LAPORAN KEUANGAN & PPh BADAN =====
-        let pphPaid = 0, topupTotal = 0;
-        // Tarif: Pasal 17 ayat (1) huruf b UU PPh (22%); Pasal 31E ayat (1): diskon 50% untuk bagian peredaran bruto s.d. Rp 4,8 M (peredaran bruto <= Rp 50 M)
+        // PPh Badan tiap 2 MINGGU: tiap akhir periode 2 minggu game (14 hari game = ±11,2 jam nyata) terbit tagihan sebesar
+        // PPh kumulatif dikurangi yang sudah pernah ditagih. Bayar sebelum jatuh tempo; lewat itu denda otomatis
+        // ditambahkan ke tagihan dan makin besar tiap hari game keterlambatan.
+        const PPH_TARIF_KECIL = 0.15, PPH_TARIF_UMUM = 0.30;   // tarif SIMULASI game, dinaikkan dari 11% / 22% aslinya
+        const PPH_DAY_MS = 86400000, PPH_PERIODE_MS = 14 * PPH_DAY_MS;
+        const PPH_JATUH_TEMPO_HARI = 2;                         // batas bayar: 2 hari game (±96 menit nyata) sejak tagihan terbit
+        const PPH_DENDA_AWAL = 0.20, PPH_DENDA_PER_HARI = 0.10, PPH_DENDA_MAX = 1.0; // denda 20% begitu lewat tempo, +10%/hari game berikutnya, maksimal 100% dari pokok tagihan
+        let pphPaid = 0, pphBilled = 0, pphBills = [], nextPphGt = 0, topupTotal = 0;
+        // Tarif: omzet <= Rp 4,8 M pakai tarif kecil; Rp 4,8-50 M campuran (bagian laba setara Rp 4,8 M pertama tarif kecil, sisanya tarif umum); > Rp 50 M tarif umum.
         function calcPph(laba, omzet) {
             if (laba <= 0 || omzet <= 0) return 0;
-            if (omzet <= 4.8e9) return Math.round(laba * 0.11);
-            if (omzet <= 50e9) { const a = laba * 4.8e9 / omzet; return Math.round(a * 0.11 + (laba - a) * 0.22); }
-            return Math.round(laba * 0.22);
+            if (omzet <= 4.8e9) return Math.round(laba * PPH_TARIF_KECIL);
+            if (omzet <= 50e9) { const a = laba * 4.8e9 / omzet; return Math.round(a * PPH_TARIF_KECIL + (laba - a) * PPH_TARIF_UMUM); }
+            return Math.round(laba * PPH_TARIF_UMUM);
+        }
+        const pphPokokBelum = () => pphBills.reduce((n, b) => n + b.amt, 0);
+        const pphDendaBelum = () => pphBills.reduce((n, b) => n + b.fine, 0);
+        // Dipanggil dari tickStock (tiap ~6 detik): terbitkan tagihan mingguan & hitung denda yang lewat jatuh tempo.
+        function tickPph() {
+            if (!currentAccount) return;
+            const now = gameNow();
+            if (!nextPphGt) nextPphGt = GAME_START + PPH_PERIODE_MS;
+            let berubah = false;
+            if (now >= nextPphGt) {
+                const baru = Math.max(0, calcPph(totalIncome - totalExpense, totalIncome) - pphBilled);
+                nextPphGt += PPH_PERIODE_MS * Math.max(1, Math.ceil((now - nextPphGt + 1) / PPH_PERIODE_MS)); // lompat ke batas minggu berikutnya (aman kalau game lama ditinggal)
+                if (baru > 0) {
+                    pphBilled += baru;
+                    pphBills.push({ id: Date.now(), amt: baru, gt: now, due: now + PPH_JATUH_TEMPO_HARI * PPH_DAY_MS, fine: 0, rate: 0 });
+                    addLog(`PAJAK: Tagihan PPh Badan periode 2 minggu ini terbit ${formatRupiah(baru)}. Bayar di tab Laporan dalam ${PPH_JATUH_TEMPO_HARI} hari game, kalau lewat kena denda otomatis mulai ${Math.round(PPH_DENDA_AWAL * 100)}%.`, 'warning');
+                }
+                berubah = true;
+            }
+            pphBills.forEach(b => {
+                if (now <= b.due) return;
+                const telat = Math.floor((now - b.due) / PPH_DAY_MS);
+                const rate = Math.min(PPH_DENDA_MAX, PPH_DENDA_AWAL + PPH_DENDA_PER_HARI * telat);
+                if (rate > b.rate) {
+                    const pertama = b.rate === 0;
+                    b.rate = rate; b.fine = Math.round(b.amt * rate); berubah = true;
+                    addLog(`PAJAK: PPh Badan ${formatRupiah(b.amt)} TERLAMBAT ${telat + 1} hari. Denda otomatis ${Math.round(rate * 100)}% = ${formatRupiah(b.fine)}${rate >= PPH_DENDA_MAX ? ' (batas maksimal denda)' : ' dan terus naik tiap hari game'}.`, 'warning');
+                }
+            });
+            if (berubah && typeof renderFinance === 'function') renderFinance();
         }
         function renderFinance() {
             const box = document.getElementById('fin-report'); if (!box) return;
-            const laba = totalIncome - totalExpense, tax = calcPph(laba, totalIncome), kurang = Math.max(0, tax - pphPaid);
+            const laba = totalIncome - totalExpense, tax = calcPph(laba, totalIncome), pokokBelum = pphPokokBelum(), dendaBelum = pphDendaBelum(), kurang = pokokBelum + dendaBelum;
             const row = (l, v, c, b) => `<div class="flex justify-between gap-2 ${b ? 'border-t border-gray-700 pt-1 font-bold' : ''}"><span class="text-gray-400 font-sans">${l}</span><span class="${c || 'text-gray-200'}">${v}</span></div>`;
             const neg = n => (n < 0 ? '(' + formatRupiah(-n) + ')' : formatRupiah(n));
             box.innerHTML = row('Pendapatan (peredaran bruto)', formatRupiah(totalIncome), 'text-emerald-400')
@@ -207,27 +244,37 @@
                 + row('Laba (Rugi) Bersih', neg(laba - tax), laba - tax >= 0 ? 'text-emerald-400' : 'text-red-400', true)
                 + row('Kas saat ini', formatRupiah(companyCash), 'text-teal-300', true)
                 + row('Setoran modal tambahan (top up)', formatRupiah(topupTotal), 'text-sky-300');
+            const estimasi = Math.max(0, tax - pphBilled), jt = pphBills.length ? Math.min(...pphBills.map(b => b.due)) : 0, now = gameNow();
+            const sisaMs = nextPphGt ? Math.max(0, nextPphGt - now) : 0;
             document.getElementById('pph-box').innerHTML = row('Dasar pengenaan (laba sebelum pajak)', neg(laba))
                 + row('Tarif efektif', laba > 0 ? (tax / laba * 100).toFixed(1).replace('.', ',') + '%' : '-')
-                + row('PPh terutang', formatRupiah(tax), 'text-amber-300')
+                + row('PPh terutang (kumulatif)', formatRupiah(tax), 'text-amber-300')
                 + row('Sudah dibayar', formatRupiah(pphPaid), 'text-emerald-400')
-                + row('Kurang bayar', formatRupiah(kurang), kurang ? 'text-red-400' : 'text-gray-300', true);
+                + row('Estimasi PPh periode berjalan (2 minggu)', formatRupiah(estimasi), 'text-gray-300')
+                + row('Tagihan berikutnya terbit', nextPphGt ? 'dalam ' + Math.floor(sisaMs / PPH_DAY_MS) + ' hr ' + Math.floor((sisaMs % PPH_DAY_MS) / 3600000) + ' j game' : '-', 'text-gray-300')
+                + row('Tagihan PPh belum dibayar', formatRupiah(pokokBelum), pokokBelum ? 'text-amber-300' : 'text-gray-300')
+                + (pphBills.length ? row('Jatuh tempo terdekat', jt > now ? 'dalam ' + Math.floor((jt - now) / 3600000) + ' j game' : 'LEWAT ' + Math.floor((now - jt) / 3600000) + ' j game', jt > now ? 'text-gray-300' : 'text-red-400') : '')
+                + row('Denda keterlambatan', formatRupiah(dendaBelum), dendaBelum ? 'text-red-400' : 'text-gray-300')
+                + row('Total wajib bayar', formatRupiah(kurang), kurang ? 'text-red-400' : 'text-gray-300', true);
             document.getElementById('pph-pay').disabled = kurang <= 0;
             const co = currentAccount ? esc(currentAccount.company) : 'perusahaan';
             document.getElementById('pph-law').innerHTML = `<div class="font-bold text-gray-300">Dasar hukum untuk ${co} (WP badan dalam negeri berbentuk PT)</div>
                 <div>&bull; <b>UU No. 7 Tahun 1983</b> tentang Pajak Penghasilan, sebagaimana telah diubah terakhir dengan <b>UU No. 7 Tahun 2021</b> tentang Harmonisasi Peraturan Perpajakan (UU HPP).</div>
-                <div>&bull; Tarif umum: <b>Pasal 17 ayat (1) huruf b</b> = 22% (berlaku sejak tahun pajak 2022).</div>
-                <div>&bull; Fasilitas: <b>Pasal 31E ayat (1)</b> (UU No. 36 Tahun 2008) = pengurangan tarif 50% (efektif 11%) atas penghasilan kena pajak dari bagian peredaran bruto sampai Rp 4,8 miliar, bagi peredaran bruto sampai Rp 50 miliar.</div>
+                <div>&bull; Tarif umum aslinya: <b>Pasal 17 ayat (1) huruf b</b> = 22%. <b>Di game ini tarif dinaikkan</b> menjadi ${Math.round(PPH_TARIF_UMUM * 100)}% (umum) dan ${Math.round(PPH_TARIF_KECIL * 100)}% (fasilitas omzet kecil).</div>
+                <div>&bull; Fasilitas: <b>Pasal 31E ayat (1)</b> (UU No. 36 Tahun 2008) = fasilitas tarif lebih rendah atas penghasilan kena pajak dari bagian peredaran bruto sampai Rp 4,8 miliar, bagi peredaran bruto sampai Rp 50 miliar.</div>
+                <div>&bull; <b>Tagihan 2 mingguan &amp; denda (aturan game):</b> PPh ditagih tiap 2 minggu game, jatuh tempo ${PPH_JATUH_TEMPO_HARI} hari game. Lewat tempo, denda otomatis ${Math.round(PPH_DENDA_AWAL * 100)}% dari tagihan, lalu +${Math.round(PPH_DENDA_PER_HARI * 100)}% tiap hari game keterlambatan (maks ${Math.round(PPH_DENDA_MAX * 100)}%).</div>
                 <div>&bull; Pelaporan: <b>UU No. 6 Tahun 1983</b> tentang KUP (diubah UU No. 7 Tahun 2021) <b>Pasal 3 ayat (3) huruf b</b>: SPT Tahunan badan paling lambat 4 bulan setelah tahun pajak berakhir.</div>
-                <div class="text-gray-500">Simulasi: laba = pendapatan &minus; beban, dihitung kumulatif sejak akun dibuat. Bukan konsultasi pajak.</div>`;
+                <div class="text-gray-500">Simulasi: laba = pendapatan &minus; beban, dihitung kumulatif sejak akun dibuat; tagihan 2 mingguan = PPh kumulatif dikurangi yang sudah ditagih. Bukan konsultasi pajak.</div>`;
         }
         function payPph() {
-            const kurang = Math.max(0, calcPph(totalIncome - totalExpense, totalIncome) - pphPaid);
-            if (kurang <= 0) return;
-            if (companyCash < kurang) return showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(kurang)} untuk membayar PPh.`, 'fa-triangle-exclamation', 'red');
-            companyCash -= kurang; pphPaid += kurang;
-            addFinanceLog('Pembayaran PPh Badan', -kurang); updateCashDisplay();
-            addLog(`PAJAK: PPh Badan ${formatRupiah(kurang)} dibayar.`, 'success');
+            const pokok = pphPokokBelum(), denda = pphDendaBelum(), total = pokok + denda;
+            if (total <= 0) return showModal('Tidak Ada Tagihan', 'Belum ada tagihan PPh yang terbit. Tagihan baru terbit tiap 2 minggu game.', 'fa-circle-info', 'blue');
+            if (companyCash < total) return showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(total)} untuk melunasi PPh${denda > 0 ? ` (pokok ${formatRupiah(pokok)} + denda ${formatRupiah(denda)})` : ''}.`, 'fa-triangle-exclamation', 'red');
+            companyCash -= total; pphPaid += pokok; pphBills = [];
+            addFinanceLog('Pembayaran PPh Badan', -pokok);
+            if (denda > 0) addFinanceLog('Denda keterlambatan PPh Badan', -denda);
+            updateCashDisplay();
+            addLog(`PAJAK: PPh Badan ${formatRupiah(pokok)}${denda > 0 ? ` + denda ${formatRupiah(denda)}` : ''} dibayar lunas.`, 'success');
         }
 
         let financeEntries = [];

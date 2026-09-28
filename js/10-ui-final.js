@@ -37,7 +37,7 @@
                 await fb.cancelBursaListing(id);
                 bursaListings = bursaListings.filter(x => x.id !== id);
                 companyFleet.push(l.truck);   // truk kembali ke garasi
-                populateTruckDropdowns(); renderFleetDashboard(); updateCashDisplay();
+                populateTruckDropdowns(); renderFleetDashboard(); updateCashDisplay(); saveGame();
                 addLog(`BURSA P2P: Iklan truk ${l.truck.id} [${l.truck.plat}] dibatalkan, unit kembali ke garasi.`, 'info');
                 renderBursa();
             } catch (e) { showModal('Gagal Membatalkan', 'Coba lagi. (' + (e.code || e.message) + ')', 'fa-triangle-exclamation', 'red'); }
@@ -63,7 +63,7 @@
                 companyFleet.push(truck);
                 addFinanceLog(`Bursa P2P: pembelian ${truck.name} [${truck.plat}] dari ${data.sellerCompany}`, -data.harga);
                 bursaListings = bursaListings.filter(x => x.id !== id);
-                populateTruckDropdowns(); renderFleetDashboard(); updateCashDisplay();
+                populateTruckDropdowns(); renderFleetDashboard(); updateCashDisplay(); saveGame();
                 addLog(`BURSA P2P: Membeli ${truck.name} [${truck.plat}] dari ${esc(data.sellerCompany)} seharga ${formatRupiah(data.harga)}. Unit ditambahkan ke garasi (${truck.id}).`, 'success');
                 showModal('Pembelian Berhasil', `${truck.name} [${truck.plat}] resmi jadi milik Anda, berpangkalan di ${(refineryData.find(k => k.id === truck.depotId) || {}).nama || 'Kilang Tuban'}.`, 'fa-circle-check', 'blue');
             } catch (e) {
@@ -98,7 +98,7 @@
                 const offlineMs = Math.max(0, Date.now() - sv.ts);
                 if (offlineMs > 0) orders.forEach(o => { o.t += offlineMs; });
             }
-            gameElapsed = sv.clock || 0; huluNormalize(sv.hulu); izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (t.kelas === 'kapal' && t.type === 'BBM' && / KL$/.test(t.name || '')) { t.cap = Math.round(t.cap * ECO.bblPerKl / 100) * 100; t.name = 'Kapal Tanker BBM ' + t.cap.toLocaleString('id-ID') + ' Bbl'; } if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; if (!t.price) t.price = 500e6; }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0;
+            gameElapsed = sv.clock || 0; huluNormalize(sv.hulu); izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (t.kelas === 'kapal' && t.type === 'BBM' && / KL$/.test(t.name || '')) { t.cap = Math.round(t.cap * ECO.bblPerKl / 100) * 100; t.name = 'Kapal Tanker BBM ' + t.cap.toLocaleString('id-ID') + ' Bbl'; } if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; if (!t.price) t.price = 500e6; }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; pphBilled = sv.pphB != null ? sv.pphB : pphPaid; pphBills = Array.isArray(sv.pphBills) ? sv.pphBills : []; nextPphGt = sv.pphNext || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0;
             document.getElementById('finance-history-log').innerHTML = '';
             financeEntries = [];
             (sv.fin || []).forEach(f => addFinanceLog(f.desc, f.amount));
@@ -202,7 +202,7 @@
         }
 
         // ===== JAM GAME: 1 menit game = 2 detik nyata (1 jam game = 2 menit nyata, 1 hari game = 48 menit nyata, 1 minggu game = 5,6 jam nyata) =====
-        const GAME_START = new Date(2026, 8, 25, 6, 0, 0).getTime(), GAME_SPEED = 60 / 2, ORDER_DELAY = 180000; // GAME_SPEED=60/2 -> 1 menit in-game = 2 detik nyata. ORDER_DELAY = jeda awal sebelum pesanan pertama boleh muncul (3 menit nyata)
+        const GAME_START = new Date(2026, 8, 25, 6, 0, 0).getTime(), GAME_SPEED = 60 / 2; // GAME_SPEED=60/2 -> 1 menit in-game = 2 detik nyata. Pesanan pertama TIDAK lagi menunggu jeda awal: muncul begitu pemain membeli armada (lihat spawnOrderForNewTruck).
         let gameElapsed = 0;
         const gameNow = () => GAME_START + gameElapsed * GAME_SPEED;
         const fmtTime = ms => new Date(ms).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':');
@@ -288,12 +288,13 @@
         // id jenis BBM di FUELS (dipakai form dispatch) ke key tangki produk jadi di PRODUCT_META/kap.
         const FUEL_KAP_KEY = { solar: 'solar', pertalite: 'pertalite', dex: 'dexlite', turbo: 'pertamax_turbo' };
         let orders = [], ordHist = [], orderSeq = 1;
-        const ORDER_BATCH = { BBM: 5, LPG: 3 }, ORDER_TTL = 1200000; // batas maksimal pesanan TERBUKA bersamaan per jenis; TTL: 20 menit nyata = 10 jam game (1 menit in-game = 2 detik nyata, lihat GAME_SPEED)
+        const ORDER_BATCH = { BBM: 5, LPG: 3 }, ORDER_TTL = 3 * 24 * 3600000 / GAME_SPEED; // batas maksimal pesanan TERBUKA bersamaan per jenis; TTL: 3 hari game = 72 jam game = 144 menit nyata (1 menit in-game = 2 detik nyata, lihat GAME_SPEED). Setelah durasi ini habis baru pesanan batal
         // Pesanan baru muncul BERTAHAP satu per satu (bukan langsung penuh sekaligus begitu ada armada pertama),
         // supaya terasa natural. Jeda dasar antar kemunculan pesanan baru = ORDER_TRICKLE_HOURS jam waktu GAME,
         // dengan sedikit variasi acak (+-30%) biar tidak terasa seperti metronom. Terus jalan sampai jumlah
         // pesanan TERBUKA per jenis menyentuh batas ORDER_BATCH di atas.
-        const ORDER_TRICKLE_HOURS = 25 / 60; // jeda dasar antar pesanan baru = tepat 25 menit game (±1,5 menit nyata)
+        const ORDER_STOK_RATIO = 0.8; // stok SPBU saat memesan WAJIB 80% dari kapasitas tangki (ambang tetap, tidak diacak lagi)
+        const ORDER_TRICKLE_HOURS = 1; // jeda antar pesanan baru = tepat 1 jam game (= 2 menit nyata), dihitung sejak pesanan sebelumnya muncul
         let nextOrderGt = 0; // gameNow() paling cepat pesanan baru berikutnya boleh muncul
         // Stok SPBU cuma diturunkan setiap STOK_TICK_MINUTES menit waktu GAME (bukan tiap kali tickStock()
         // dipanggil oleh setInterval, yang jauh lebih sering) - ganti ke 3 kalau mau penurunannya lebih rapat.
@@ -327,7 +328,7 @@
             try {
                 const wantLpg = truck.type === 'LPG';
                 const cand = [];
-                let nApproved = 0, nApprovedRightFuel = 0, nInRange = 0;
+                let nApproved = 0, nApprovedRightFuel = 0, nInRange = 0, nTerlaluBesar = 0;
                 loadedSpbuList.forEach(s => {
                     if (!isOp(s)) return;
                     nApproved++;
@@ -338,9 +339,14 @@
                         if (!(f.lpg ? s.wilayahLpgId : s.wilayahBbmId)) return; // SPBU di luar jangkauan depo aktif jenis ini
                         nInRange++;
                         if (orders.some(o => o.kode === s.kode && o.fuel === f.id)) return; // sudah ada pesanan terbuka jenis ini
+                        if (truck.cap > f.cap * 0.8) { nTerlaluBesar++; return; } // pesanan tidak boleh lebih kecil dari muatan truk: tangki SPBU ini terlalu kecil buat truk itu
                         cand.push({ s, f, ratio: (s.stok[f.id] || 0) / f.cap });
                     });
                 });
+                if (!cand.length && nTerlaluBesar > 0) {
+                    addLog(`ARMADA ${truck.id}: belum ada pesanan yang cocok. Kapasitas ${truck.cap} ${wantLpg ? 'Ton' : 'KL'} melebihi 80% tangki SPBU yang terjangkau, jadi pesanan tidak bisa dibuat sebesar muatan truk ini.`, 'warning');
+                    return;
+                }
                 if (!cand.length) {
                     // BUG FIX (diagnostik): sebelumnya fungsi ini keluar diam-diam tanpa jejak sama sekali kalau
                     // tidak ketemu kandidat SPBU, jadi pemain tidak pernah tahu KENAPA pesanan tidak muncul.
@@ -354,9 +360,11 @@
                 }
                 cand.sort((a, b) => a.ratio - b.ratio); // SPBU dengan stok paling menipis diprioritaskan
                 const { s, f } = cand[0];
-                const kl = Math.min(truck.cap, Math.round(f.cap * 0.8 * 10) / 10), unit = f.unit || 'KL';
+                const kl = truck.cap, unit = f.unit || 'KL'; // ukuran pesanan = kapasitas truk (pesanan lebih kecil dari truk tidak bisa dilayani)
+                s.stok[f.id] = Math.round(f.cap * ORDER_STOK_RATIO * 10) / 10; // stok saat memesan tepat 80%
                 orders.push({ id: orderSeq++, kode: s.kode, nama: s.nama, region: s.region, prov: s.provinsi || 'Jawa Timur', fuel: f.id, kl, unit, terkirim: 0, inTransit: 0, tahap: null, lockedTruckId: null, t: Date.now(), gt: gameNow(), status: 'open' });
                 addLog(`PESANAN BARU (Armada ${truck.id}): ${s.nama} (${s.region}) memesan ${kl} ${unit} ${f.label} - ukuran menyesuaikan kapasitas armada baru Anda.`, 'purple');
+                nextOrderGt = gameNow() + ORDER_TRICKLE_HOURS * 3600000; // pesanan otomatis berikutnya baru muncul 1 jam game setelah pesanan pertama ini
                 notify(`Armada baru siap kerja: pesanan ${kl} ${unit} ${f.label} untuk ${s.nama} menanti dikirim.`, 'info');
                 renderOrders();
             } catch (e) {
@@ -371,10 +379,11 @@
             if (gamePaused) return; // jeda manual: stok SPBU & batas waktu pesanan ikut berhenti
             const now = Date.now();
             processKirPending();
+            tickPph(); // PPh Badan mingguan: terbit tagihan & hitung denda
             orders.slice().forEach(o => { if (now - o.t > ORDER_TTL) {
                 const s = loadedSpbuList.find(x => x.kode === o.kode);
-                if (s) { ensureStok(s); s.stok[o.fuel] = FUELS.find(f => f.id === o.fuel).cap * 0.6; }
-                addLog(`PESANAN BATAL: ${o.nama} membeli ${fuelLabel(o.fuel)} dari pesaing karena pesanan ${o.kl} ${o.unit || 'KL'} tidak dipenuhi.`, 'warning');
+                if (s) { ensureStok(s); s.stok[o.fuel] = FUELS.find(f => f.id === o.fuel).cap; } // pesanan dibatalkan = SPBU beli dari pesaing, tangkinya jadi penuh 100%
+                addLog(`PESANAN BATAL: ${o.nama} membeli ${fuelLabel(o.fuel)} dari pesaing karena pesanan ${o.kl} ${o.unit || 'KL'} tidak dipenuhi. Tangki mereka kembali penuh (100%).`, 'warning');
                 closeOrder(o, 'Batal');
             } });
             if (gameNow() >= nextStockTickGt) {
@@ -391,10 +400,10 @@
             // SPBU sudah masuk kandidat pesanan begitu stoknya turun ke antara 80%-100% kapasitas tangki timbun
             // (acak tiap kali dicek) - jadi SPBU minta pasokan lebih dini & bervariasi, selagi stoknya masih
             // cukup banyak, bukan menunggu sampai hampir habis.
-            const ORDER_TRIGGER_RATIO = 0.8 + Math.random() * 0.2;
+            const ORDER_TRIGGER_RATIO = ORDER_STOK_RATIO; // SPBU baru memesan begitu stoknya turun ke 80% tangki
             const openBBM = orders.filter(o => o.fuel !== 'lpg').length, openLPG = orders.filter(o => o.fuel === 'lpg').length;
             const slotBBMOpen = openBBM < ORDER_BATCH.BBM, slotLPGOpen = openLPG < ORDER_BATCH.LPG;
-            if ((slotBBMOpen || slotLPGOpen) && gameElapsed >= ORDER_DELAY && gameNow() >= nextOrderGt) {
+            if ((slotBBMOpen || slotLPGOpen) && gameNow() >= nextOrderGt) {
                 // Ukuran pesanan = kapasitas armada milik pemain (BBM: KL, LPG: Ton)
                 const cand = [];
                 loadedSpbuList.forEach(s => { if (isOp(s)) fuelsOf(s).forEach(f => {
@@ -421,12 +430,13 @@
                     // inTransit: volume yang sudah "dipesankan" ke armada yang sedang berjalan (belum tentu sampai) -
                     // dipakai supaya pesanan yang sudah dikirim langsung hilang dari daftar terbuka meski belum
                     // dinyatakan Selesai (baru Selesai setelah truk benar-benar tiba & tuntas bongkar muatan).
-                    // tahap: fase perjalanan armada yang sedang menuju pesanan ini ('berangkat'|'tiba'|'bongkar'|null).
+                    // tahap: fase perjalanan armada yang sedang menuju pesanan ini ('muat'|'berangkat'|'tiba'|'bongkar'|null).
+                    s.stok[f.id] = Math.round(f.cap * ORDER_STOK_RATIO * 10) / 10; // stok saat memesan tepat 80%
                     orders.push({ id: orderSeq++, kode: s.kode, nama: s.nama, region: s.region, prov: s.provinsi || 'Jawa Timur', fuel: f.id, kl, unit, terkirim: 0, inTransit: 0, tahap: null, lockedTruckId: null, t: now, gt: gameNow(), status: 'open' });
                     addLog(`PESANAN OTOMATIS (${fmtTime(gameNow())}): ${s.nama} (${s.region}) memesan ${kl} ${unit} ${f.label} - sisa stok ${s.stok[f.id]} ${unit} (${Math.round(s.stok[f.id] / f.cap * 100)}% dari tangki).`, 'purple');
                     notify(`Pesanan baru masuk: ${s.nama} - ${kl} ${unit} ${f.label}. Buka tab Pesanan.`, 'info');
-                    // Jeda acak (+-30%) sebelum pesanan berikutnya boleh muncul, biar kedatangannya terasa bertahap.
-                    nextOrderGt = gameNow() + ORDER_TRICKLE_HOURS * 3600000 * (0.7 + Math.random() * 0.6);
+                    // Jeda tetap 1 jam game sebelum pesanan berikutnya boleh muncul, biar kedatangannya terasa bertahap.
+                    nextOrderGt = gameNow() + ORDER_TRICKLE_HOURS * 3600000;
                 }
             }
             const p0 = refineryData[0], pp = p0.stok_current / p0.stok_max;
@@ -472,6 +482,48 @@
         // Pesanan yang terkunci (lockedTruckId, kirim bertahap) JUGA selalu disembunyikan dari daftar terbuka -
         // termasuk saat truk yang mengunci sedang balik ke pool untuk muat ulang (inTransit sempat 0 lagi) -
         // karena pesanan ini eksklusif milik truk itu sampai lunas, bukan lagi rebutan truk lain (lihat orderLockBlock).
+        // ===== STATUS ARMADA DI TAB PESANAN SPBU (idle vs sedang jalan) =====
+        // truckFase: id truk -> fase perjalanan ('muat'|'berangkat'|'tiba'|'bongkar'|'kembali'), diisi updateOrderTahap()/animateDelivery().
+        const truckFase = new Map();
+        const FASE_LABEL = { muat: 'Muat', berangkat: 'Berangkat', tiba: 'Tiba', bongkar: 'Bongkar', kembali: 'Pulang' };
+        const docExpired = t => t.kirTs <= gameNow() || t.stnkTs <= gameNow() || t.platTs <= gameNow();
+        const fleetStat = type => {
+            const all = companyFleet.filter(t => t.type === type && t.kelas !== 'kapal');
+            const idle = all.filter(t => !busyIds.has(t.id)), jalan = all.filter(t => busyIds.has(t.id)), fase = {};
+            jalan.forEach(t => { const f = truckFase.get(t.id) || 'muat'; fase[f] = (fase[f] || 0) + 1; });
+            return { all, idle, jalan, fase };
+        };
+        const faseTxt = fase => Object.keys(FASE_LABEL).filter(k => fase[k]).map(k => `${FASE_LABEL[k]} ${fase[k]}`).join(' &middot; ');
+        // Status unit untuk SATU pesanan: memakai aturan yang sama persis dengan tombol Kirim (dokumen, kunci pesanan,
+        // ukuran truk vs sisa pesanan, stok depo) tapi tanpa memunculkan modal. cls: 'ok' (hijau) | 'warn' (kuning) | 'bad' (merah).
+        function orderUnitStatus(o) {
+            const type = o.fuel === 'lpg' ? 'LPG' : 'BBM', unit = type === 'LPG' ? 'Ton' : 'KL';
+            const sp = loadedSpbuList.find(x => x.kode === o.kode), st = fleetStat(type);
+            if (!st.all.length) return { cls: 'bad', txt: `Belum punya truk ${type}` };
+            if (!st.idle.length) return { cls: 'bad', txt: `Semua unit jalan`, tip: `${st.jalan.length} unit bertugas: ${faseTxt(st.fase).replace(/&middot;/g, ',')}` };
+            const docOk = st.idle.filter(t => !docExpired(t));
+            if (!docOk.length) return { cls: 'warn', txt: 'Unit idle, dokumen habis', tip: 'KIR/STNK/Plat kedaluwarsa - perpanjang di tab Armada' };
+            if (!sp) return { cls: 'ok', txt: `${docOk.length} unit idle` };
+            const sisa = Math.round((o.kl - o.terkirim - (o.inTransit || 0)) * 10) / 10;
+            const fit = docOk.filter(t => !orderLockBlock(sp, o.fuel, t) && !truckSizeBlock(sp, o.fuel, t, type));
+            if (!fit.length) return { cls: 'warn', txt: 'Unit idle tidak cocok', tip: `Sisa pesanan ${sisa} ${unit} - kapasitas idle: ${docOk.map(t => t.cap).join('/')} ${unit}` };
+            const kapKey = o.fuel === 'lpg' ? 'lpg_tabung' : FUEL_KAP_KEY[o.fuel];
+            const ready = fit.filter(t => pickOrigin(type, sp, t.cap, t, kapKey));
+            if (!ready.length) return { cls: 'warn', txt: `${fit.length} unit idle, stok depo kurang`, tip: 'Olah/transfer stok produk ini ke depo dulu' };
+            return { cls: 'ok', txt: `${ready.length} unit siap`, tip: 'Kapasitas: ' + [...new Set(ready.map(t => t.cap))].join('/') + ' ' + unit };
+        }
+        function renderOrdFleetBar() {
+            const el = document.getElementById('ord-fleet'); if (!el) return;
+            const chip = (type, ic, col) => {
+                const st = fleetStat(type), fz = faseTxt(st.fase);
+                return `<div class="bg-gray-900/70 border border-gray-800 rounded-xl px-2.5 py-2"><div class="flex items-center justify-between gap-2 text-[10px] font-bold text-gray-300"><span><i class="fa-solid ${ic} ${col} mr-1"></i>Truk ${type}</span><span class="text-gray-500">${st.all.length} unit</span></div>
+                  <div class="flex items-center gap-2 mt-1 text-[11px] font-black"><span class="text-emerald-400"><i class="fa-solid fa-circle text-[6px] align-middle mr-1"></i>${st.idle.length} idle</span><span class="text-amber-400"><i class="fa-solid fa-circle text-[6px] align-middle mr-1 ${st.jalan.length ? 'animate-pulse' : ''}"></i>${st.jalan.length} jalan</span></div>
+                  <div class="text-[9px] text-gray-500 mt-0.5 truncate">${fz || 'Tidak ada yang bertugas'}</div></div>`;
+            };
+            const crew = role => { const a = companyCrew.filter(c => c.role === role); return `${a.filter(c => !busyIds.has(c.id)).length}/${a.length}`; };
+            el.innerHTML = chip('BBM', 'fa-gas-pump', 'text-blue-400') + chip('LPG', 'fa-fire', 'text-orange-400') +
+                `<div class="col-span-2 text-[9px] text-gray-500 px-1">Kru bebas: Supir <b class="text-gray-300">${crew('Supir')}</b> &middot; Kernet <b class="text-gray-300">${crew('Kernet')}</b> (perlu 1 supir + 1 kernet tiap pengiriman)</div>`;
+        }
         const isOrderDispatchable = o => !o.lockedTruckId && (o.kl - o.terkirim - (o.inTransit || 0)) > 0;
         function renderOrders() {
             const badge = document.getElementById('ord-badge');
@@ -488,6 +540,7 @@
             const dOrders = orders.filter(isOrderDispatchable);
             const kpi = (l, v, c, ic) => `<div class="stat-chip"><i class="fa-solid ${ic} ${c} stat-chip-icon"></i><div class="stat-chip-label">${l}</div><div class="stat-chip-value ${c}">${v}</div></div>`;
             document.getElementById('ord-kpi').innerHTML = kpi('Pesanan BBM', dOrders.filter(o => o.fuel !== 'lpg').length, 'text-blue-400', 'fa-gas-pump') + kpi('Pesanan LPG', dOrders.filter(o => o.fuel === 'lpg').length, 'text-orange-400', 'fa-fire') + kpi('Stok Habis', dOrders.filter(o => live(o) <= 0).length, 'text-amber-400', 'fa-triangle-exclamation') + kpi('Total Diminta', dOrders.filter(o => !o.unit || o.unit === 'KL').reduce((n, o) => n + o.kl - o.terkirim - (o.inTransit || 0), 0) + ' KL' + (dOrders.some(o => o.unit === 'Ton') ? ' + ' + dOrders.filter(o => o.unit === 'Ton').reduce((n, o) => n + o.kl - o.terkirim - (o.inTransit || 0), 0) + ' T' : ''), 'text-emerald-400', 'fa-truck-ramp-box');
+            renderOrdFleetBar();
             // ===== KELOMPOKKAN PESANAN PER KILANG/DEPO SUMBER =====
             // Setiap pesanan dikaitkan ke kilang/depo AKTIF terdekat yang benar-benar men-supply jenis produknya
             // (lihat recomputeWilayah/nearestActiveKilang). Kalau pemain sudah membuka kilang/depo kedua,
@@ -514,8 +567,9 @@
                   </div>
                   <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden"><div class="${pct <= 0 ? 'bg-red-600' : 'bg-gradient-to-r from-amber-500 to-orange-500'} h-full rounded-full" style="width:${pct}%"></div></div>
                   <div class="flex items-center justify-between gap-2">
-                    <div class="text-[10px] text-gray-400 leading-tight">${sisa <= 0 ? '<b class="text-red-400">STOK HABIS</b>' : `Sisa <b class="text-amber-400">${sisa} ${f.unit || 'KL'}</b>/${f.cap}`} <span class="mx-0.5 text-gray-700">&middot;</span> Pesan <b class="text-emerald-400">${o.kl - o.terkirim - (o.inTransit || 0)} ${o.unit || 'KL'}</b> <span class="inline-flex items-center gap-1 ml-1 bg-gray-950 border border-gray-800 rounded-full px-1.5 py-0.5 text-gray-400"><i class="fa-regular fa-clock"></i>${Math.floor(left / 60)}j ${left % 60}m</span></div>
-                    <button onclick="kirimPesanan(${o.id})" class="shrink-0 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 shadow shadow-emerald-900/30"><i class="fa-solid fa-paper-plane text-[9px]"></i>Kirim</button>
+                    <div class="text-[10px] text-gray-400 leading-tight">${sisa <= 0 ? '<b class="text-red-400">STOK HABIS</b>' : `Sisa <b class="text-amber-400">${sisa} ${f.unit || 'KL'}</b>/${f.cap}`} <span class="mx-0.5 text-gray-700">&middot;</span> Pesan <b class="text-emerald-400">${o.kl - o.terkirim - (o.inTransit || 0)} ${o.unit || 'KL'}</b> <span class="inline-flex items-center gap-1 ml-1 bg-gray-950 border border-gray-800 rounded-full px-1.5 py-0.5 text-gray-400"><i class="fa-regular fa-clock"></i>${left >= 1440 ? Math.floor(left / 1440) + 'hr ' + Math.floor((left % 1440) / 60) + 'j' : Math.floor(left / 60) + 'j ' + (left % 60) + 'm'}</span></div>
+                    <div class="shrink-0 flex flex-col items-end gap-1">${(() => { const u = orderUnitStatus(o), c = { ok: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10', warn: 'text-amber-300 border-amber-500/40 bg-amber-500/10', bad: 'text-red-300 border-red-500/40 bg-red-500/10' }[u.cls]; return `<span title="${esc(u.tip || '')}" class="text-[9px] font-bold border rounded-full px-1.5 py-0.5 ${c}"><i class="fa-solid ${u.cls === 'ok' ? 'fa-circle-check' : u.cls === 'warn' ? 'fa-triangle-exclamation' : 'fa-ban'} mr-0.5"></i>${u.txt}</span>`; })()}
+                    <button onclick="kirimPesanan(${o.id})" class="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center gap-1 shadow shadow-emerald-900/30"><i class="fa-solid fa-paper-plane text-[9px]"></i>Kirim</button></div>
                   </div>
                 </div>`;
             };
@@ -547,13 +601,13 @@
                 </div>`;
             }).join('') : (companyFleet.length ? `<div class="text-xs text-gray-500 text-center py-6 bg-gray-950/60 border border-gray-800 rounded-xl"><i class="fa-solid fa-circle-check text-emerald-500/60 text-lg mb-1.5 block"></i>Belum ada pesanan ${ordFuelFilter === 'ALL' ? '' : ordFuelFilter + ' '}yang cocok dengan filter ini. Pesanan muncul otomatis, ukurannya mengikuti kapasitas armada Anda.</div>` : '<div class="text-xs text-gray-500 text-center py-6 bg-gray-950/60 border border-gray-800 rounded-xl"><i class="fa-solid fa-truck-fast text-gray-700 text-lg mb-1.5 block"></i>Belum punya armada. Beli truk dulu (BBM dan/atau LPG); pesanan menyesuaikan kapasitas armada yang Anda miliki.</div>');
             // BUG FIX (Pesanan): pesanan yang sedang dalam perjalanan (inTransit > 0) ikut ditampilkan di sini
-            // dengan status "Proses" berjalan (Berangkat -> Tiba -> Bongkar Muat) - jadi begitu truk dikirim,
+            // dengan status "Proses" berjalan (Muat -> Berangkat -> Tiba -> Bongkar Muat) - jadi begitu truk dikirim,
             // pesanan langsung pindah dari daftar terbuka di atas ke sini, dan otomatis berubah jadi "Selesai"
             // (hijau) sendiri begitu bongkar muatan tuntas, tanpa perlu aksi tambahan dari pemain.
             // Pesanan yang terkunci (kirim bertahap) tetap tampil di sini walau inTransit sempat 0 (truk yang
             // menguncinya lagi balik ke pool buat muat ulang) - biar pemain tidak kehilangan jejak & tahu harus
             // pakai armada yang sama itu untuk lanjut mengirim.
-            const TAHAP_LABEL = { berangkat: 'Proses &middot; Berangkat', tiba: 'Proses &middot; Tiba di Tujuan', bongkar: 'Proses &middot; Bongkar Muat' };
+            const TAHAP_LABEL = { muat: 'Proses &middot; Muat Kargo', berangkat: 'Proses &middot; Berangkat', tiba: 'Proses &middot; Tiba di Tujuan', bongkar: 'Proses &middot; Bongkar Muat' };
             const prosesRows = orders.filter(o => (o.inTransit || 0) > 0 || o.lockedTruckId).map(o =>
                 `<div class="flex items-center gap-2 bg-gray-900/70 rounded-lg px-2.5 py-1.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0"></span><span class="truncate text-gray-300 flex-1">${esc(o.nama)} &middot; ${fuelLabel(o.fuel)} ${o.kl} ${o.unit || 'KL'}</span><b class="text-amber-400 shrink-0">${(o.inTransit || 0) > 0 ? (TAHAP_LABEL[o.tahap] || 'Proses') : `Terkunci &middot; Menunggu ${esc(o.lockedTruckId)}`}</b></div>`);
             const histRows = ordHist.map(o => `<div class="flex items-center gap-2 bg-gray-900/70 rounded-lg px-2.5 py-1.5"><span class="w-1.5 h-1.5 rounded-full ${o.status === 'Selesai' ? 'bg-emerald-400' : 'bg-red-400'} shrink-0"></span><span class="truncate text-gray-300 flex-1">${esc(o.nama)} &middot; ${fuelLabel(o.fuel)} ${o.kl} ${o.unit || 'KL'}</span><b class="${o.status === 'Selesai' ? 'text-emerald-400' : 'text-red-400'} shrink-0">${o.status}</b></div>`);

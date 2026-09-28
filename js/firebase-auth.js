@@ -94,8 +94,9 @@
         // pemain login dari HP lalu dari laptop, status "sudah dilihat"-nya tersinkron - tidak dobel per perangkat.
         markBroadcastSeen: (uid, ts) => setDoc(doc(db, 'users', uid), { lastBroadcastSeen: ts }, { merge: true }),
         // ===== Bursa P2P: jual-beli unit truk bekas antar pemain nyata =====
-        listenBursaListings: cb => onSnapshot(query(collection(db, 'bursa'), where('status', '==', 'open'), orderBy('created', 'desc'), limit(200)),
-            sn => cb(sn.docs.map(d => ({ id: d.id, ...d.data() }))), e => console.warn('Listener bursa:', e)),
+        // Tanpa orderBy supaya TIDAK butuh composite index (status + created); urutan dibuat di sisi client.
+        listenBursaListings: (cb, onErr) => onSnapshot(query(collection(db, 'bursa'), where('status', '==', 'open'), limit(200)),
+            sn => cb(sn.docs.map(d => ({ id: d.id, ...d.data() }))), e => { console.warn('Listener bursa:', e); if (onErr) onErr(e); }),
         postBursaListing(sellerUid, sellerCompany, truck, harga) {
             const ref = doc(collection(db, 'bursa'));
             return setDoc(ref, { sellerUid, sellerCompany, truck, harga, status: 'open', created: serverTimestamp() }).then(() => ref.id);

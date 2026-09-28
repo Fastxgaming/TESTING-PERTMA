@@ -198,6 +198,14 @@
                            depoNama: origin.nama, tujuanNama: spbu.nama, nomorSJ: d.nomorSJ };
             const fit = ownAnims === 1;
             try {
+                // FASE MUAT: kru memuat kargo di kilang/depo asal dulu (pasangan dari fase bongkar), baru truk berangkat.
+                // Stok kilang sudah dikurangi saat surat jalan ditandatangani; di sini hanya jeda waktu muat + status pesanan.
+                updateOrderTahap(spbu, truck, d.jenisMuatan, 'muat');
+                addLog(`MUAT: ${truck.id} [Supir: ${driver.name}] sedang dimuati ${d.jenisMuatan} (${truck.cap} ${truck.type === 'LPG' ? 'Ton' : 'KL'}) di ${origin.nama} (±${LOAD_SECONDS} detik)...`, 'info', 'truck');
+                notify(`${truck.id} sedang memuat ${d.jenisMuatan} di ${origin.nama}...`, 'info');
+                await pausableDelay(LOAD_SECONDS * 1000);
+                updateOrderTahap(spbu, truck, d.jenisMuatan, 'berangkat');
+                addLog(`BERANGKAT: ${truck.id} [Supir: ${driver.name}] selesai muat & berangkat membawa ${d.jenisMuatan} ke ${spbu.nama}.`, 'info', 'truck');
                 d.km = await journey(origin, spbu, meta, fit);
                 updateOrderTahap(spbu, truck, d.jenisMuatan, 'tiba');
                 addLog(`TIBA: ${truck.id} [Supir: ${driver.name}] sampai di ${spbu.nama}. Kru bersiap bongkar muatan (±${UNLOAD_SECONDS} detik)...`, 'info', 'truck');
@@ -211,15 +219,16 @@
                     // PENTING: truk/supir/kernet baru dibebaskan (busyIds) SETELAH benar-benar tiba di depot di bawah ini,
                     // supaya tidak bisa ditugaskan ulang (dobel) selagi masih dalam perjalanan pulang.
                     try {
+                        truckFase.set(truck.id, 'kembali'); renderOrders();
                         await journey(spbu, origin, meta, false);
                         addLog(`TIBA DI DEPOT: ${truck.id} [Supir: ${driver.name}] kembali ke ${origin.nama} setelah selesai bongkar muatan.`, 'info', 'truck');
                     } catch (e) { /* animasi balik gagal dimuat, tidak mempengaruhi keuangan yang sudah cair */ }
                     ids.forEach(x => busyIds.delete(x));
-                    populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard();
+                    populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard(); renderOrders();
                 }
             } catch (err) {
                 ids.forEach(x => busyIds.delete(x));
-                populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard();
+                populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard(); renderOrders();
                 ownAnims = Math.max(0, ownAnims - 1);
             }
         }
@@ -292,7 +301,7 @@
             revenueKotor += fulfilOrder(spbu, jenisMuatan, truck);
 
             // Bonus jarak tempuh (berlaku BBM & LPG): sampai jarakBonusMinKm (50 km) harga tetap/dasar; di atas itu
-            // pendapatan naik bonusJarakPerKm (0,15%) dari nilai muatan per km kelebihan, dibatasi jarakBonusCapKm
+            // pendapatan naik bonusJarakPerKm (kini 0,25%) dari nilai muatan per km kelebihan, dibatasi jarakBonusCapKm
             // (300 km) supaya rute super jauh tidak jadi absurd. Supaya kirim jauh sepadan dengan waktu tempuhnya.
             const jarakBonusKm = Math.max(0, Math.min(d.km || 0, ECO.jarakBonusCapKm) - ECO.jarakBonusMinKm);
             const bonusJarak = Math.round(truck.cap * hargaPerUnit * ECO.bonusJarakPerKm * jarakBonusKm);
@@ -303,7 +312,9 @@
             // Biaya BBM Solar truk dihitung dari jarak riil pulang-pergi (PP) sepanjang jalur nyata yang dilalui.
             const roundTripKmBiaya = Math.round((d.km || 0) * 2 * 10) / 10;
             const biayaBbm = Math.round((roundTripKmBiaya / kmPerLiterTruk(truck)) * HARGA_SOLAR_TRUK);
-            const biayaKirim = biayaKirimDasar + biayaBbm;
+            // ASURANSI PENGANTARAN: premi tiap pengantaran = asuransiPersen (1%) dari nilai muatan (kapasitas x harga jual).
+            const biayaAsuransi = Math.round(truck.cap * hargaPerUnit * ECO.asuransiPersen);
+            const biayaKirim = biayaKirimDasar + biayaBbm + biayaAsuransi;
             const revenueBersih = revenueKotor - biayaKirim;
 
             companyCash += revenueBersih;
@@ -314,6 +325,7 @@
             if (bonusJarak > 0) addFinanceLog(`Bonus jarak tempuh ${truck.id} ke ${spbu.nama} (±${Math.round(d.km || 0)} km, +${Math.round(jarakBonusKm)} km di atas ${ECO.jarakBonusMinKm} km)`, bonusJarak);
             addFinanceLog(`Biaya kirim dasar ${truck.id} ke ${spbu.nama}`, -biayaKirimDasar);
             addFinanceLog(`Biaya BBM Solar truk ${truck.id} (PP, ±${roundTripKmBiaya} km)`, -biayaBbm);
+            addFinanceLog(`Asuransi pengantaran ${truck.id} ke ${spbu.nama} (${Math.round(ECO.asuransiPersen * 100)}% nilai muatan)`, -biayaAsuransi);
 
             // Truk kembali ke depot pangkalan setelah bongkar muatan tuntas - jarak PP dihitung ke odometer & keausan ban
             const roundTripKm = roundTripKmBiaya;
@@ -335,7 +347,7 @@
             renderDriversDashboard();
             renderFleetDashboard();
 
-            addLog(`BONGKAR SELESAI (SJ ${nomorSJ}): ${truck.id} [Supir: ${driver.name}] tuntas bongkar ${jenisMuatan} di ${spbu.nama}. Kotor ${formatRupiah(revenueKotor)}${bonusJarak > 0 ? ` (termasuk bonus jarak +${Math.round(jarakBonusKm)} km di atas ${ECO.jarakBonusMinKm} km: ${formatRupiah(bonusJarak)})` : ''} - biaya kirim dasar ${formatRupiah(biayaKirimDasar)} - BBM ${formatRupiah(biayaBbm)} = bersih ${formatRupiah(revenueBersih)} cair ke kas. ${result.notes.join('; ')}. Menempuh ±${roundTripKm} km PP (total odometer ${truck.odometer.toLocaleString('id-ID')} km, sisa ban ${truck.banPct}%).${banNote}`, result.violated ? 'warning' : 'success', 'truck');
+            addLog(`BONGKAR SELESAI (SJ ${nomorSJ}): ${truck.id} [Supir: ${driver.name}] tuntas bongkar ${jenisMuatan} di ${spbu.nama}. Kotor ${formatRupiah(revenueKotor)}${bonusJarak > 0 ? ` (termasuk bonus jarak +${Math.round(jarakBonusKm)} km di atas ${ECO.jarakBonusMinKm} km: ${formatRupiah(bonusJarak)})` : ''} - biaya kirim dasar ${formatRupiah(biayaKirimDasar)} - BBM ${formatRupiah(biayaBbm)} - asuransi ${formatRupiah(biayaAsuransi)} = bersih ${formatRupiah(revenueBersih)} cair ke kas. ${result.notes.join('; ')}. Menempuh ±${roundTripKm} km PP (total odometer ${truck.odometer.toLocaleString('id-ID')} km, sisa ban ${truck.banPct}%).${banNote}`, result.violated ? 'warning' : 'success', 'truck');
             notify(`Pendapatan ${formatRupiah(revenueBersih)} cair dari ${truck.id} setelah bongkar muatan di ${spbu.nama}.`, result.violated ? 'warn' : 'info');
 
             // busyIds TIDAK dilepas di sini lagi - baru dilepas setelah truk benar-benar tiba kembali di depot asal

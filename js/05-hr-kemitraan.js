@@ -586,18 +586,36 @@
             const lockedTruck = companyFleet.find(t => t.id === o.lockedTruckId);
             return `Pesanan ${spbu.nama} sedang dikirim bertahap oleh armada ${o.lockedTruckId}${lockedTruck ? ' [' + lockedTruck.name + ']' : ''}. Armada lain tidak bisa membantu sampai pesanan ini lunas - tunggu ${o.lockedTruckId} kembali dan kirim lagi pakai armada itu.`;
         }
-        // Cek kesesuaian ukuran truk vs sisa pesanan SPBU: truk kecil boleh dipakai kirim bertahap (nyicil),
-        // TAPI hanya kalau semua truk yang cukup besar untuk melunasi sisa pesanan dalam sekali jalan sedang bertugas/tidak ada.
-        // Kalau ada truk yang pas & lagi nganggur, truk kecil harus nunggu / pemain diarahkan pakai truk itu dulu.
+        // Bisakah volume r dilunasi persis oleh kombinasi armada berkapasitas caps (boleh dipakai berulang)?
+        // Dipakai supaya pengiriman bertahap tidak meninggalkan sisa pesanan yang tidak akan pernah muat di truk mana pun.
+        function ordCanFill(r, caps) {
+            const n = Math.round(r * 10);
+            if (n <= 0) return true;
+            const cs = caps.map(c => Math.round(c * 10)).filter(c => c > 0);
+            const ok = new Array(n + 1).fill(false); ok[0] = true;
+            for (let i = 1; i <= n; i++) for (const c of cs) if (c <= i && ok[i - c]) { ok[i] = true; break; }
+            return ok[n];
+        }
+        // Cek kesesuaian ukuran truk vs sisa pesanan SPBU.
+        // ATURAN: kapasitas truk TIDAK BOLEH melebihi sisa pesanan (pesanan 8 KL tidak bisa diangkut truk 32 KL).
+        // Truk yang lebih kecil boleh kirim bertahap (nyicil), asalkan sisa setelahnya masih bisa dilunasi armada Anda,
+        // dan hanya kalau tidak ada truk yang PAS (kapasitas = sisa) yang sedang nganggur.
         function truckSizeBlock(spbu, fuelId, truck, type) {
             const o = orders.find(x => x.kode === spbu.kode && x.fuel === fuelId);
             if (!o) return null; // tidak ada pesanan aktif buat kombinasi ini, tidak ada batasan
-            const sisa = Math.round((o.kl - o.terkirim) * 10) / 10;
-            if (truck.cap >= sisa) return null; // truk ini sendiri sudah cukup buat lunasi sisa pesanan
             const unit = type === 'LPG' ? 'Ton' : 'KL';
-            const better = companyFleet.find(t => t.type === type && t.kelas !== 'kapal' && t.id !== truck.id && t.cap >= sisa && !busyIds.has(t.id));
-            if (!better) return null; // tidak ada truk yang lebih pas & available - truk kecil boleh nyicil
-            return `Sisa pesanan ${spbu.nama} tinggal ${sisa} ${unit}, dan armada ${better.id} [${better.name}] berkapasitas ${better.cap} ${unit} sedang tidak bertugas - cukup buat melunasi sekali jalan. Gunakan ${better.id} dulu sebelum memakai ${truck.id} [${truck.cap} ${unit}] buat kirim bertahap.`;
+            const sisa = Math.round((o.kl - o.terkirim - (o.inTransit || 0)) * 10) / 10; // yang belum dikirim & belum dibawa armada lain
+            if (sisa <= 0) return `Pesanan ${spbu.nama} sudah terpenuhi seluruhnya oleh armada yang sedang dalam perjalanan. Tidak perlu kirim lagi.`;
+            if (truck.cap > sisa) return `Pesanan ${spbu.nama} hanya ${sisa} ${unit}, sedangkan ${truck.id} [${truck.name}] berkapasitas ${truck.cap} ${unit}. Muatan truk tidak boleh melebihi pesanan - pakai armada berkapasitas ${sisa} ${unit} atau lebih kecil.`;
+            if (truck.cap === sisa) return null; // pas persis
+            const caps = capsOf(type);
+            if (ordCanFill(sisa, caps)) {
+                const r = Math.round((sisa - truck.cap) * 10) / 10;
+                if (!ordCanFill(r, caps)) return `Kalau ${truck.id} [${truck.cap} ${unit}] dikirim sekarang, sisa pesanan ${spbu.nama} tinggal ${r} ${unit} dan tidak akan muat di armada mana pun milik Anda (tidak boleh melebihi pesanan). Pakai armada dengan kapasitas yang pas dengan sisa ${sisa} ${unit}.`;
+            }
+            const better = companyFleet.find(t => t.type === type && t.kelas !== 'kapal' && t.id !== truck.id && t.cap === sisa && !busyIds.has(t.id));
+            if (!better) return null; // tidak ada truk yang pas & available - truk kecil boleh nyicil
+            return `Sisa pesanan ${spbu.nama} tinggal ${sisa} ${unit}, dan armada ${better.id} [${better.name}] berkapasitas ${better.cap} ${unit} sedang tidak bertugas - pas buat melunasi sekali jalan. Gunakan ${better.id} dulu sebelum memakai ${truck.id} [${truck.cap} ${unit}] buat kirim bertahap.`;
         }
 
         // DISPATCH BBM - Tahap 1: validasi pilihan lalu buka Surat Jalan untuk ditandatangani

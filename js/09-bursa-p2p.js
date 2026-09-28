@@ -362,7 +362,15 @@
         // tab Bursa P2P dibuka (lihat switchTab), bukan sepanjang sesi login.
         function startBursaListingsListener() {
             if (!window.fb || !currentAccount) return;
-            if (!bursaListingsUnsub) bursaListingsUnsub = fb.listenBursaListings(list => { bursaListings = list; if (!document.getElementById('tab-bursa').classList.contains('hidden')) renderBursa(); });
+            if (bursaListingsUnsub) return;
+            bursaListingsUnsub = fb.listenBursaListings(list => {
+                // terbaru di atas; iklan yang baru dipasang (created belum terisi server) dianggap paling baru
+                bursaListings = list.sort((a, b) => (b.created ? b.created.seconds : 9e15) - (a.created ? a.created.seconds : 9e15));
+                if (!document.getElementById('tab-bursa').classList.contains('hidden')) renderBursa();
+            }, e => {
+                bursaListingsUnsub = null;   // biar bisa dicoba lagi saat tab dibuka ulang
+                showModal('Daftar Bursa Gagal Dimuat', 'Iklan tidak bisa diambil dari server. Coba buka ulang tab Bursa P2P. (' + (e.code || e.message) + ')', 'fa-triangle-exclamation', 'red');
+            });
         }
         function stopBursaListingsListener() { if (bursaListingsUnsub) { bursaListingsUnsub(); bursaListingsUnsub = null; } }
 
@@ -442,7 +450,7 @@
             companyFleet.splice(idx, 1);   // truk keluar dari garasi selama iklan aktif
             try {
                 await fb.postBursaListing(currentAccount.id, currentAccount.company, truck, harga);
-                populateTruckDropdowns(); renderFleetDashboard(); updateCashDisplay();
+                populateTruckDropdowns(); renderFleetDashboard(); updateCashDisplay(); saveGame();
                 addLog(`BURSA P2P: Truk ${truck.id} [${truck.plat}] dipasang di Bursa P2P seharga ${formatRupiah(harga)}.`, 'info');
                 notify(`${truck.name} dipasang di Bursa P2P.`, 'info');
                 return true;

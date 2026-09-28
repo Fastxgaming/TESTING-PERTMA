@@ -229,7 +229,8 @@
         }
 
         // ===== BELI BAHAN BAKAR KILANG UTAMA =====
-        const BBL_PRICE = 1100000; let bbmWarned = false, bbmSpent = 0;
+        // Harga beli BBL mentah (diturunkan dari 1.100.000). Batas bawah: biaya pokok anjungan ±Rp 256.000/Bbl (opex mingguan ÷ produksi), jadi harga beli harus tetap di atas itu.
+        const BBL_PRICE = 900000; let bbmWarned = false, bbmSpent = 0;
         // Batas atas kapasitas tangki (upgrade tidak bisa lewat ini): BBL mentah & LPG Curah sama-sama 10 Juta.
         const KAP_UPGRADE_CAPS = { lpg_curah: 10000000 };
         const BBL_KAP_MAX = 10000000, BBL_KAP_STEP = 200000, BBL_KAP_BASE_COST = 1500e6;

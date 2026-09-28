@@ -115,7 +115,7 @@
             { icon: 'fa-gas-pump', title: '3. Kirim BBM / LPG ke SPBU', desc: 'Buka tab Pesanan SPBU, tekan tombol "Kirim" di pesanan yang mau dilayani, lalu pilih truk + supir + kernet dan tanda tangani Surat Jalan. Pendapatan cair otomatis setelah truk tiba dan selesai bongkar muatan.' },
             { icon: 'fa-bell', title: '4. Pantau Pesanan SPBU', desc: 'Kalau stok BBM di suatu SPBU menipis, SPBU otomatis memesan ke perusahaanmu. Cek tab Pesanan SPBU secara rutin dan kirim sebelum batas waktu habis, atau SPBU beralih ke pesaing.' },
             { icon: 'fa-right-left', title: '5. Bursa P2P', desc: 'Punya truk nganggur? Buka tab Armada, lalu klik tombol "Jual ke Bursa P2P" di kartu truk yang tidak bertugas untuk langsung pasang iklan (harga wajar otomatis terisi, tinggal sesuaikan). Bisa juga lewat tab Bursa P2P langsung, atau beli truk bekas dari pemain lain dengan harga lebih murah daripada beli baru di Dealer.' },
-            { icon: 'fa-trophy', title: '6. Naik Peringkat & Cek Laporan', desc: 'Tab Peringkat membandingkan kas, armada, dan kilang/depo milikmu dengan pemain lain. Tab Laporan menampilkan pemasukan, pengeluaran, dan kewajiban PPh Badan perusahaanmu.' },
+            { icon: 'fa-trophy', title: '6. Naik Peringkat & Cek Laporan', desc: 'Tab Peringkat membandingkan kas, armada, dan kilang/depo milikmu dengan pemain lain. Tab Laporan menampilkan pemasukan, pengeluaran, dan kewajiban PPh Badan perusahaanmu (ditagih tiap 2 minggu game, telat bayar kena denda).' },
             { icon: 'fa-circle-check', title: 'Selamat Berbisnis!', desc: 'Itu dia dasar-dasarnya. Kamu bisa buka tutorial ini lagi kapan saja lewat tombol Tutorial di bagian atas layar. Selamat membangun kerajaan logistik energimu!' }
         ];
         let tutStep = 0;
@@ -142,7 +142,7 @@
 
         let companyCash = 650000000;
         // ===== EKONOMI (sesuaikan di sini) =====
-        const ECO = { bblPerKl: 6.2898, jualKl: 10000000, jualTon: 10400000, hppTon: 9500000, bonusPesanan: 0.06, bonusJarakPerKm: 0.0015, jarakBonusMinKm: 50, jarakBonusCapKm: 300, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000 };
+        const ECO = { bblPerKl: 6.2898, jualKl: 10000000, jualTon: 10400000, hppTon: 9500000, bonusPesanan: 0.10, bonusJarakPerKm: 0.0025, asuransiPersen: 0.01, jarakBonusMinKm: 50, jarakBonusCapKm: 300, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000 };
         let totalIncome = 0;
         let totalExpense = 0;
 

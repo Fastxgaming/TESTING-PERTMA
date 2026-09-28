@@ -301,7 +301,7 @@
                 cash: companyCash, income: totalIncome, expense: totalExpense,
                 refineries: refineryData.map(k => ({ id: k.id, u: k.is_unlocked, s: k.stok_current, m: k.stok_max, lvl: k.stokUpgradeLevel, mid: k.mekanikId, kap: k.kap })),
                 fleet: companyFleet, crew: companyCrew, crewCounter: crewIdCounter, sj: suratJalanCounter,
-                spbu: loadedSpbuList, fin: financeEntries, orders, ordHist, nextOrderGt, setor: lastSetor, izin: izinLog, clock: gameElapsed, hulu, topups: appliedTopups, pph: pphPaid, bbm: bbmSpent, tsetor: topupTotal, ts: Date.now()
+                spbu: loadedSpbuList, fin: financeEntries, orders, ordHist, nextOrderGt, setor: lastSetor, izin: izinLog, clock: gameElapsed, hulu, topups: appliedTopups, pph: pphPaid, pphB: pphBilled, pphBills, pphNext: nextPphGt, bbm: bbmSpent, tsetor: topupTotal, ts: Date.now()
             };
         }
 
