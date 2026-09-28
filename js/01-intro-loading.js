@@ -1,6 +1,6 @@
         // ===== LAYAR LOADING & PLAY GAME (sebelum Daftar/Masuk) =====
         // Satu-satunya tempat untuk update nomor versi - otomatis tampil di layar loading & layar "Main Sekarang".
-        const APP_VERSION = '1.3.0';
+        const APP_VERSION = '1.4.0';
         (function showAppVersion() {
             const label = 'v' + APP_VERSION;
             const a = document.getElementById('app-version-loading'); if (a) a.textContent = label;
