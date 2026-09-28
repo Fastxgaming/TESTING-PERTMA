@@ -1,4 +1,8 @@
-        // ===== SEKTOR HULU (UPSTREAM) - TAHAP 2: 3 LOKASI ANJUNGAN (MINYAK + GAS), UPGRADE PRODUKSI =====
+        // ===== SEKTOR HULU (UPSTREAM) - TAHAP 3: PIPA BAWAH LAUT + KEJADIAN ACAK (KEBOCORAN, CUACA BURUK) =====
+        // Tahap 3 menambah: (1) pipa bawah laut per anjungan ke Kilang Tuban yang mengalirkan hasil otomatis tanpa kapal/kru,
+        // (2) kebocoran pipa acak (aliran berhenti, biaya bersih-bersih, harus diperbaiki), (3) cuaca buruk acak di Laut Madura
+        // (gelombang tinggi: kapal dilarang berlayar; badai: kapal dilarang + produksi anjungan turun 50%). Pipa kebal cuaca.
+        // Tahap 2: 3 LOKASI ANJUNGAN (MINYAK + GAS), UPGRADE PRODUKSI.
         // Pemain membangun anjungan lepas pantai di Laut Madura. Anjungan minyak menghasilkan minyak mentah (Bbl) yang
         // diangkut Kapal Tanker BBM ke stok mentah Kilang Tuban. Anjungan gas menghasilkan gas bumi yang dijual masuk
         // sebagai LPG Curah (Ton) ke Kilang Tuban lewat Kapal Tanker LPG. Semua TAMBAHAN: tombol beli di tab Kilang tetap ada.
@@ -16,12 +20,29 @@
         };
         const HULU_KEYS = Object.keys(HULU_SITES);
         const HULU_DAY = 86400000, HULU_MAX_LVL = 3, HULU_UP = { rate: 0.30, opex: 0.20, cost: 0.5, growth: 1.6 };
+        // Pipa bawah laut & kejadian acak. Biaya/tagihan dihitung dari jarak anjungan -> Kilang Tuban.
+        const HULU_PIPE = { costKm: { oil: 0.45e9, gas: 0.40e9 }, opexKm: 6e6, hoursPerKm: 0.25, capMult: 2,
+                            repairPct: 0.06, cleanPct: 0.025, inspectPct: 0.015, finePct: 0.01, repairHours: 6,
+                            leakBase: 0.03, leakAge: 0.012, leakMax: 0.18 };   // peluang bocor/hari = dasar + umur sejak inspeksi terakhir
+        const HULU_STORM = { badai: { label: 'Badai', prodMult: 0.5, color: '#a855f7' }, gelombang: { label: 'Gelombang tinggi', prodMult: 1, color: '#f59e0b' } };
+        const huluPipeDefault = () => ({ built: false, ready: false, readyGt: 0, lastGt: 0, opexDueGt: 0, unpaid: false, leak: false, leakGt: 0, repairDoneGt: 0, inspectGt: 0, fineDueGt: 0, flowed: 0, leaks: 0 });
         const huluSiteDefault = () => ({ built: false, ready: false, readyGt: 0, lastGt: 0, opexDueGt: 0, stok: 0, transit: 0, produced: 0, shutIn: false, lvl: 0 });
-        const huluDefault = () => { const s = {}; HULU_KEYS.forEach(k => { s[k] = huluSiteDefault(); }); return { sites: s }; };
+        const huluDefault = () => { const s = {}, p = {}; HULU_KEYS.forEach(k => { s[k] = huluSiteDefault(); p[k] = huluPipeDefault(); }); return { sites: s, pipes: p, storm: { kind: '', untilGt: 0, nextGt: 0 } }; };
         let hulu = huluDefault();
         let huluEpoch = 0;   // naik tiap progres dimuat ulang; kapal "sesi lama" tidak menambah stok lagi
         let huluSel = 'alpha';
         const hs = k => hulu.sites[k];
+        const hp = k => hulu.pipes[k];
+        const pipeKm = k => distKm(HULU_SITES[k], refineryData[0]);
+        const pipeCost = k => Math.round(pipeKm(k) * HULU_PIPE.costKm[HULU_SITES[k].fuel] / 1e8) * 1e8;
+        const pipeOpex = k => Math.round(pipeKm(k) * HULU_PIPE.opexKm / 1e6) * 1e6;
+        const pipeHours = k => Math.ceil(pipeKm(k) * HULU_PIPE.hoursPerKm);
+        const pipeCap = k => Math.round(HULU_SITES[k].rate * HULU_PIPE.capMult);   // kapasitas alir per hari game
+        const pipeRepairCost = k => Math.round(pipeCost(k) * HULU_PIPE.repairPct);
+        const pipeInspectCost = k => Math.round(pipeCost(k) * HULU_PIPE.inspectPct);
+        const pipeLeakRate = k => Math.min(HULU_PIPE.leakMax, HULU_PIPE.leakBase + HULU_PIPE.leakAge * Math.max(0, (gameNow() - hp(k).inspectGt) / HULU_DAY));
+        const huluStormMult = () => (HULU_STORM[hulu.storm.kind] || { prodMult: 1 }).prodMult;
+        const huluStormLeftMs = () => (hulu.storm.kind ? Math.max(0, hulu.storm.untilGt - gameNow()) : 0);
         const hRate = k => HULU_SITES[k].rate * (1 + HULU_UP.rate * hs(k).lvl);
         const hCap = k => Math.round(HULU_SITES[k].cap * (1 + HULU_UP.rate * hs(k).lvl));
         const hOpex = k => Math.round(HULU_SITES[k].opexDay * (1 + HULU_UP.opex * hs(k).lvl));
@@ -43,8 +64,27 @@
                 // Kapal tidak ikut tersimpan: muatan yang masih di laut saat save dikembalikan ke tangki anjungan.
                 d.stok += d.transit; d.transit = 0;
             });
+            // Tahap 3: pipa & cuaca. Save Tahap 1-2 tidak punya field ini -> default (aman).
+            const pr = raw && typeof raw === 'object' && raw.pipes && typeof raw.pipes === 'object' ? raw.pipes : {};
+            HULU_KEYS.forEach(k => {
+                const r = pr[k], d = out.pipes[k];
+                if (!r || typeof r !== 'object') return;
+                d.built = r.built === true; d.ready = r.ready === true && d.built;
+                d.readyGt = num(r.readyGt, 0); d.lastGt = num(r.lastGt, 0); d.opexDueGt = num(r.opexDueGt, 0);
+                d.unpaid = r.unpaid === true; d.leak = r.leak === true && d.ready;
+                d.leakGt = num(r.leakGt, 0); d.repairDoneGt = d.leak ? num(r.repairDoneGt, 0) : 0;
+                d.inspectGt = num(r.inspectGt, 0); d.fineDueGt = num(r.fineDueGt, 0);
+                d.flowed = num(r.flowed, 0); d.leaks = Math.floor(num(r.leaks, 0));
+            });
+            const st = raw && typeof raw === 'object' && raw.storm && typeof raw.storm === 'object' ? raw.storm : null;
+            if (st) {
+                out.storm.kind = HULU_STORM[st.kind] ? st.kind : '';
+                out.storm.untilGt = num(st.untilGt, 0); out.storm.nextGt = num(st.nextGt, 0);
+                if (!out.storm.kind) out.storm.untilGt = 0;
+            }
             huluEpoch++;
             hulu = out;
+            huluPipeSig = {};
             huluMarkerSig = {}; huluUiSig = '';
             huluSyncMarkers();
             return out;
@@ -81,12 +121,12 @@
             if (guard >= 5 && now >= s.opexDueGt) s.opexDueGt = now + 1; // lompatan waktu sangat jauh: hindari tagihan menumpuk
             const cap = hCap(k);
             if (!s.shutIn && s.stok < cap) {
-                const add = Math.min(cap - s.stok, hRate(k) * (now - s.lastGt) / HULU_DAY);
+                const add = Math.min(cap - s.stok, hRate(k) * huluStormMult() * (now - s.lastGt) / HULU_DAY);
                 s.stok += add; s.produced += add;
             }
             s.lastGt = now;
         }
-        function huluTick() { if (currentAccount) HULU_KEYS.forEach(huluTickSite); }
+        function huluTick() { if (currentAccount) { huluStormTick(); HULU_KEYS.forEach(huluTickSite); HULU_KEYS.forEach(huluTickPipe); } }
 
         // ---------- Penanda di peta ----------
         const huluMarkers = {}; let huluMarkerSig = {};
@@ -120,6 +160,7 @@
                     </div>`;
                 }, { maxWidth: 220 });
             });
+            huluSyncPipes();
         }
         function huluOpen(k) { if (HULU_SITES[k]) huluSel = k; switchTab('tab-hulu'); }
         function huluPick(k) { if (HULU_SITES[k]) { huluSel = k; huluRender(); } }
@@ -197,6 +238,7 @@
         async function huluKirim() {
             const k = huluSel, c = HULU_SITES[k], s = hs(k);
             if (!currentAccount || !s.ready) return;
+            if (hulu.storm.kind) return showModal('Pelayaran Ditunda', `${HULU_STORM[hulu.storm.kind].label} di Laut Madura. Kapal dilarang berangkat selama ±${fmtJam(huluStormLeftMs() / 3600000)} waktu game lagi. Pipa bawah laut tidak terpengaruh cuaca.`, 'fa-cloud-bolt', 'amber');
             const kapal = companyFleet.find(t => t.id === document.getElementById('hulu-ship').value);
             const nahkoda = companyCrew.find(x => x.id === document.getElementById('hulu-nahkoda').value);
             const abk = companyCrew.find(x => x.id === document.getElementById('hulu-abk').value);
@@ -268,10 +310,236 @@
             updateCashDisplay(); renderRefineries();
         }
 
+        // ---------- Kejadian acak: cuaca buruk ----------
+        function huluStormTick() {
+            const st = hulu.storm, now = gameNow(), rnd = (a, b) => a + Math.random() * (b - a);
+            if (st.kind) {
+                if (now < st.untilGt) return;
+                const lbl = HULU_STORM[st.kind].label;
+                st.kind = ''; st.untilGt = 0; st.nextGt = now + rnd(2, 6) * HULU_DAY;
+                addLog(`CUACA: ${lbl} di Laut Madura mereda. Pelayaran dan produksi anjungan kembali normal.`, 'success');
+                notify('Cuaca Laut Madura membaik, kapal boleh berlayar lagi.', 'ok');
+                return;
+            }
+            if (!st.nextGt) st.nextGt = now + rnd(2, 5) * HULU_DAY;
+            if (now < st.nextGt) return;
+            // Cuaca buruk hanya relevan kalau pemain sudah punya sesuatu di hulu; kalau belum, tunda saja.
+            if (!HULU_KEYS.some(k => hs(k).built || hp(k).built)) { st.nextGt = now + HULU_DAY; return; }
+            st.kind = Math.random() < 0.65 ? 'gelombang' : 'badai';
+            st.untilGt = now + rnd(4, 10) * 3600000;
+            if (st.kind === 'badai') {
+                addLog(`CUACA: BADAI di Laut Madura selama ±${fmtJam((st.untilGt - now) / 3600000)} game. Kapal dilarang berlayar dan produksi anjungan turun 50%. Pipa bawah laut tetap mengalir.`, 'warning');
+                notify('Badai di Laut Madura! Kapal dilarang berlayar, produksi anjungan turun 50%.', 'warn');
+            } else {
+                addLog(`CUACA: Gelombang tinggi di Laut Madura selama ±${fmtJam((st.untilGt - now) / 3600000)} game. Kapal dilarang berlayar. Pipa bawah laut tetap mengalir.`, 'warning');
+                notify('Gelombang tinggi! Kapal dilarang berlayar sementara.', 'warn');
+            }
+        }
+
+        // ---------- Pipa bawah laut: aliran otomatis, biaya operasional, kebocoran ----------
+        let huluFlowDirty = false, huluLastRefRender = 0;
+        function huluTickPipe(k) {
+            const p = hp(k), s = hs(k), c = HULU_SITES[k], now = gameNow();
+            if (!p.built) return;
+            const nama = 'Pipa ' + c.nama;
+            if (!p.ready) {
+                if (now < p.readyGt) return;
+                p.ready = true; p.lastGt = p.readyGt; p.opexDueGt = p.readyGt + HULU_DAY; p.inspectGt = p.readyGt;
+                addLog(`HULU: ${nama} selesai dibangun dan mulai mengalirkan ${c.jenis} ke Kilang Tuban (maks ±${fmtN(pipeCap(k))} ${c.unit}/hari).`, 'success');
+                notify(`${nama} selesai dan mulai mengalir!`, 'ok');
+            }
+            if (now < p.lastGt) { p.lastGt = now; return; }
+            const dtDay = (now - p.lastGt) / HULU_DAY;
+            // perbaikan selesai
+            if (p.leak && p.repairDoneGt && now >= p.repairDoneGt) {
+                p.leak = false; p.repairDoneGt = 0; p.inspectGt = now;
+                addLog(`HULU: ${nama} selesai diperbaiki, aliran dilanjutkan.`, 'success');
+                notify(`${nama} sudah diperbaiki, mengalir lagi.`, 'ok');
+            }
+            // biaya operasional/perawatan pipa
+            let guard = 0;
+            while (now >= p.opexDueGt && guard++ < 5) {
+                const opex = pipeOpex(k);
+                if (companyCash >= opex) {
+                    companyCash -= opex; totalExpense += opex;
+                    addFinanceLog(`Perawatan ${nama} (1 hari)`, -opex);
+                    p.opexDueGt += HULU_DAY; updateCashDisplay();
+                    if (p.unpaid) { p.unpaid = false; addLog(`HULU: ${nama} mengalir lagi setelah biaya perawatan dilunasi.`, 'success'); notify(`${nama} mengalir lagi.`, 'ok'); }
+                } else {
+                    if (!p.unpaid) {
+                        p.unpaid = true;
+                        addLog(`HULU: ${nama} DIHENTIKAN karena kas tidak cukup membayar perawatan ${formatRupiah(opex)}/hari.`, 'warning');
+                        notify(`${nama} berhenti: kas tidak cukup untuk perawatan.`, 'warn');
+                    }
+                    break;
+                }
+            }
+            if (guard >= 5 && now >= p.opexDueGt) p.opexDueGt = now + 1;
+            // kebocoran acak (peluang naik seiring umur sejak inspeksi terakhir)
+            if (!p.leak && !p.unpaid && dtDay > 0 && Math.random() < 1 - Math.exp(-pipeLeakRate(k) * Math.min(dtDay, 3))) {
+                p.leak = true; p.leakGt = now; p.repairDoneGt = 0; p.fineDueGt = now + HULU_DAY; p.leaks++;
+                const clean = Math.round(pipeCost(k) * HULU_PIPE.cleanPct);
+                companyCash -= clean; totalExpense += clean;
+                addFinanceLog(`Bersih-bersih tumpahan akibat kebocoran ${nama}`, -clean);
+                updateCashDisplay();
+                addLog(`KEBOCORAN: ${nama} BOCOR! Aliran otomatis berhenti. Biaya bersih-bersih ${formatRupiah(clean)}. Segera perbaiki di tab Anjungan Hulu; makin lama dibiarkan, denda lingkungan harian berjalan.`, 'warning');
+                notify(`${nama} bocor! Aliran berhenti, segera perbaiki.`, 'warn');
+                huluSyncPipes();
+            }
+            // denda lingkungan harian selama bocor dan belum diperbaiki
+            if (p.leak && !p.repairDoneGt) {
+                let g2 = 0;
+                while (now >= p.fineDueGt && g2++ < 5) {
+                    const fine = Math.round(pipeCost(k) * HULU_PIPE.finePct);
+                    if (companyCash < fine) break;
+                    companyCash -= fine; totalExpense += fine;
+                    addFinanceLog(`Denda lingkungan kebocoran ${nama} (1 hari)`, -fine);
+                    p.fineDueGt += HULU_DAY; updateCashDisplay();
+                    addLog(`DENDA: kebocoran ${nama} belum diperbaiki, denda lingkungan ${formatRupiah(fine)}.`, 'warning');
+                }
+                if (g2 >= 5 && now >= p.fineDueGt) p.fineDueGt = now + 1;
+            }
+            // aliran: tangki anjungan -> Kilang Tuban
+            if (!p.leak && !p.unpaid && s.ready && s.stok > 0) {
+                const d = huluDest(k), q = Math.min(pipeCap(k) * dtDay, s.stok, d.room);
+                if (q > 0.01) { s.stok -= q; d.credit(q); p.flowed += q; huluFlowDirty = true; }
+            }
+            p.lastGt = now;
+        }
+        // Status pipa. 'key' dipakai penanda perubahan besar (bangun ulang tampilan); 'label' boleh berubah-ubah.
+        function huluPipeInfo(k) {
+            const p = hp(k), s = hs(k);
+            if (!p.built) return { key: 'n', label: 'Belum dibangun', color: '#64748b' };
+            if (!p.ready) return { key: 'b', label: 'Sedang dibangun', color: '#f59e0b' };
+            if (p.leak) return p.repairDoneGt ? { key: 'x', label: 'Sedang diperbaiki', color: '#f59e0b' } : { key: 'l', label: 'BOCOR - aliran berhenti', color: '#ef4444' };
+            if (p.unpaid) return { key: 'u', label: 'Berhenti (kas kurang)', color: '#ef4444' };
+            const room = s.ready ? huluDest(k).room : 0;
+            if (s.stok > 0.5 && room > 0.5) return { key: 'r', label: 'Mengalir ke Kilang Tuban', color: '#14b8a6' };
+            return { key: 'r', label: room <= 0.5 ? 'Siaga (tangki Tuban penuh)' : 'Siaga (tangki anjungan kosong)', color: '#64748b' };
+        }
+        // Garis pipa di peta (merah putus-putus saat bocor + ikon tetesan di tengah pipa)
+        const huluPipeLines = {}, huluPipeLeakMk = {}; let huluPipeSig = {};
+        function huluSyncPipes() {
+            if (typeof map === 'undefined' || !map || typeof L === 'undefined') return;
+            const tuban = refineryData[0];
+            HULU_KEYS.forEach(k => {
+                const c = HULU_SITES[k], p = hp(k), info = huluPipeInfo(k), sig = info.key;
+                if (huluPipeSig[k] === sig && (huluPipeLines[k] || !p.built)) return;
+                if (huluPipeLines[k]) { map.removeLayer(huluPipeLines[k]); huluPipeLines[k] = null; }
+                if (huluPipeLeakMk[k]) { map.removeLayer(huluPipeLeakMk[k]); huluPipeLeakMk[k] = null; }
+                huluPipeSig[k] = sig;
+                if (!p.built) return;
+                const col = info.key === 'l' ? '#ef4444' : info.key === 'x' || info.key === 'b' ? '#f59e0b' : info.key === 'u' ? '#94a3b8' : (c.fuel === 'gas' ? '#fb923c' : '#2dd4bf');
+                huluPipeLines[k] = L.polyline([[c.lat, c.lon], [tuban.lat, tuban.lon]], { color: col, weight: 3, opacity: 0.9, dashArray: info.key === 'r' ? null : '6 6' }).addTo(map);
+                huluPipeLines[k].bindTooltip(`Pipa ${c.nama} - ${info.label}`, { sticky: true });
+                if (info.key === 'l' || info.key === 'x') {
+                    huluPipeLeakMk[k] = L.marker([(c.lat + tuban.lat) / 2, (c.lon + tuban.lon) / 2], {
+                        icon: L.divIcon({ className: '', iconSize: [24, 24], iconAnchor: [12, 12],
+                            html: `<div style="width:24px;height:24px;border-radius:50%;background:#ef4444;border:2px solid #fff;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;box-shadow:0 2px 8px rgba(0,0,0,.5)"><i class="fa-solid fa-droplet"></i></div>` }),
+                        zIndexOffset: 650 }).addTo(map);
+                    huluPipeLeakMk[k].bindTooltip('Titik kebocoran pipa', { sticky: true });
+                }
+            });
+        }
+
+        // ---------- Bangun, inspeksi & perbaiki pipa ----------
+        async function huluPipeBuild(k) {
+            const c = HULU_SITES[k], p = hp(k);
+            if (!currentAccount || !c || !hs(k).ready || p.built) return;
+            const cost = pipeCost(k), hrs = pipeHours(k);
+            if (companyCash < cost) return showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(cost)} untuk membangun pipa bawah laut dari ${c.nama}.`, 'fa-triangle-exclamation', 'red');
+            const ok = await showConfirm(`Bangun pipa bawah laut ±${Math.round(pipeKm(k))} km dari ${c.nama} ke Kilang Tuban seharga ${formatRupiah(cost)}? Pembangunan ${hrs} jam waktu game. Setelah jadi, ${c.jenis} mengalir otomatis (maks ${fmtN(pipeCap(k))} ${c.unit}/hari) tanpa kapal & kru, kebal cuaca buruk, dengan perawatan ${formatRupiah(pipeOpex(k))}/hari. Risiko: pipa bisa bocor secara acak.`,
+                { title: 'Bangun Pipa Bawah Laut', iconClass: 'fa-grip-lines', theme: 'blue', okLabel: 'Bangun' });
+            if (!ok || hp(k).built || !hs(k).ready || companyCash < cost) return;
+            companyCash -= cost; totalExpense += cost;
+            addFinanceLog(`Pembangunan pipa bawah laut ${c.nama}`, -cost);
+            hulu.pipes[k] = Object.assign(huluPipeDefault(), { built: true, readyGt: gameNow() + hrs * 3600000 });
+            updateCashDisplay();
+            addLog(`HULU: Pembangunan pipa bawah laut ${c.nama} dimulai (estimasi ${hrs} jam game).`, 'info');
+            huluSyncPipes(); huluRender();
+        }
+        async function huluPipeInspect(k) {
+            const c = HULU_SITES[k], p = hp(k);
+            if (!currentAccount || !p.ready || p.leak) return;
+            const cost = pipeInspectCost(k);
+            if (companyCash < cost) return showModal('Kas Tidak Cukup', `Inspeksi pipa butuh ${formatRupiah(cost)}.`, 'fa-triangle-exclamation', 'red');
+            const ok = await showConfirm(`Inspeksi & perawatan menyeluruh pipa ${c.nama} seharga ${formatRupiah(cost)}? Risiko bocor kembali ke ${(HULU_PIPE.leakBase * 100).toFixed(1).replace('.', ',')}%/hari (sekarang ${(pipeLeakRate(k) * 100).toFixed(1).replace('.', ',')}%/hari).`,
+                { title: 'Inspeksi Pipa', iconClass: 'fa-magnifying-glass', theme: 'blue', okLabel: 'Inspeksi' });
+            if (!ok || !p.ready || p.leak || companyCash < cost) return;
+            companyCash -= cost; totalExpense += cost; p.inspectGt = gameNow();
+            addFinanceLog(`Inspeksi pipa ${c.nama}`, -cost); updateCashDisplay();
+            addLog(`HULU: Inspeksi pipa ${c.nama} selesai, risiko kebocoran kembali ke level dasar.`, 'success');
+            huluRefreshUi();
+        }
+        async function huluPipeRepair(k) {
+            const c = HULU_SITES[k], p = hp(k);
+            if (!currentAccount || !p.ready || !p.leak || p.repairDoneGt) return;
+            const cost = pipeRepairCost(k);
+            if (companyCash < cost) return showModal('Kas Tidak Cukup', `Perbaikan pipa butuh ${formatRupiah(cost)}.`, 'fa-triangle-exclamation', 'red');
+            const ok = await showConfirm(`Perbaiki kebocoran pipa ${c.nama} seharga ${formatRupiah(cost)}? Perbaikan memakan ${HULU_PIPE.repairHours} jam waktu game; denda lingkungan berhenti begitu perbaikan dimulai.`,
+                { title: 'Perbaiki Pipa', iconClass: 'fa-screwdriver-wrench', theme: 'blue', okLabel: 'Perbaiki' });
+            if (!ok || !p.leak || p.repairDoneGt || companyCash < cost) return;
+            companyCash -= cost; totalExpense += cost; p.repairDoneGt = gameNow() + HULU_PIPE.repairHours * 3600000;
+            addFinanceLog(`Perbaikan kebocoran pipa ${c.nama}`, -cost); updateCashDisplay();
+            addLog(`HULU: Perbaikan pipa ${c.nama} dimulai (±${HULU_PIPE.repairHours} jam game).`, 'info');
+            huluSyncPipes(); huluRender();
+        }
+
         // ---------- Tampilan tab "Anjungan Hulu" ----------
+        function huluWeatherHtml() {
+            const st = hulu.storm;
+            if (!st.kind) return `<i class="fa-solid fa-sun text-emerald-400 mr-1.5"></i>Cuaca Laut Madura: <b class="text-emerald-300">cerah/aman</b>. Kapal boleh berlayar.`;
+            const w = HULU_STORM[st.kind];
+            return `<i class="fa-solid fa-cloud-bolt mr-1.5" style="color:${w.color}"></i><b style="color:${w.color}">${w.label}</b> di Laut Madura, reda dalam ±${fmtJam(huluStormLeftMs() / 3600000)} game. Kapal dilarang berlayar${st.kind === 'badai' ? ', produksi anjungan turun 50%' : ''}. Pipa tidak terpengaruh.`;
+        }
+        function huluPipeHtml(k) {
+            const c = HULU_SITES[k], s = hs(k), p = hp(k);
+            if (!s.ready) return '';
+            const chip = (l, v, cls, id) => `<div class="stat-chip"><div class="stat-chip-label">${l}</div><div ${id ? `id="${id}"` : ''} class="stat-chip-value ${cls}">${v}</div></div>`;
+            const head = `<h3 class="text-xs font-bold text-sky-400 uppercase tracking-wider mb-1 flex items-center"><i class="fa-solid fa-grip-lines mr-2"></i> Pipa Bawah Laut ke Kilang Tuban</h3>`;
+            let body;
+            if (!p.built) {
+                body = `<p class="text-[11px] text-gray-400 mb-2.5">Mengalirkan ${c.jenis} otomatis dari tangki anjungan ke Tuban tanpa kapal & kru, dan tidak terganggu cuaca buruk. Risikonya: pipa bisa bocor acak dan harus diperbaiki.</p>
+                    <div class="grid grid-cols-2 gap-2 text-[10px] mb-3">${chip('Panjang', '±' + Math.round(pipeKm(k)) + ' km', 'text-sky-400')}${chip('Biaya Bangun', formatRupiah(pipeCost(k)), 'text-amber-400')}
+                        ${chip('Waktu Bangun', pipeHours(k) + ' jam game', 'text-sky-400')}${chip('Kapasitas Alir', fmtN(pipeCap(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}
+                        ${chip('Perawatan', formatRupiah(pipeOpex(k)) + '/hari', 'text-red-400')}${chip('Risiko Bocor Dasar', (HULU_PIPE.leakBase * 100).toFixed(1).replace('.', ',') + '%/hari', 'text-orange-400')}</div>
+                    <button onclick="huluPipeBuild('${k}')" class="w-full bg-sky-700 hover:bg-sky-600 text-white font-bold py-2.5 rounded-xl text-xs transition"><i class="fa-solid fa-hammer mr-1.5"></i>Bangun Pipa Bawah Laut</button>`;
+            } else if (!p.ready) {
+                body = `<div class="text-[11px] text-gray-300 mb-1.5">Pemasangan pipa berlangsung...</div><div id="pipe-build-bar">${huluBar(0, 'bg-amber-500')}</div><div id="pipe-build-left" class="text-[10px] text-gray-400 mt-1.5"></div>`;
+            } else {
+                let act;
+                if (p.leak && !p.repairDoneGt) act = `<button onclick="huluPipeRepair('${k}')" class="w-full mt-3 bg-red-700 hover:bg-red-600 text-white font-bold py-2 rounded-xl text-xs transition"><i class="fa-solid fa-screwdriver-wrench mr-1.5"></i>Perbaiki Pipa (${formatRupiah(pipeRepairCost(k))})</button>
+                    <div class="text-[9px] text-red-300 mt-1">Aliran berhenti. Denda lingkungan ${formatRupiah(Math.round(pipeCost(k) * HULU_PIPE.finePct))}/hari berjalan sampai perbaikan dimulai.</div>`;
+                else if (p.leak) act = `<div id="pipe-repair-left" class="text-[10px] text-amber-300 mt-3"></div>`;
+                else act = `<button onclick="huluPipeInspect('${k}')" class="w-full mt-3 bg-sky-800 hover:bg-sky-700 text-white font-bold py-2 rounded-xl text-xs transition"><i class="fa-solid fa-magnifying-glass mr-1.5"></i>Inspeksi Pipa (${formatRupiah(pipeInspectCost(k))})</button>
+                    <div class="text-[9px] text-gray-500 mt-1">Inspeksi mengembalikan risiko bocor ke level dasar. Makin lama tidak diinspeksi, makin besar risikonya.</div>`;
+                body = `<div class="flex items-center gap-2 text-[11px] mb-2"><span id="pipe-status" class="font-bold text-gray-200"></span></div>
+                    <div class="grid grid-cols-2 gap-2 text-[10px]">${chip('Kapasitas Alir', fmtN(pipeCap(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Perawatan', formatRupiah(pipeOpex(k)) + '/hari', 'text-red-400')}
+                        ${chip('Total Dialirkan', '', 'text-sky-400', 'pipe-flowed')}${chip('Tagihan Berikut', '', 'text-amber-400', 'pipe-due')}
+                        ${chip('Risiko Bocor', '', 'text-orange-400', 'pipe-risk')}${chip('Jumlah Kebocoran', '', 'text-gray-300', 'pipe-leaks')}</div>${act}`;
+            }
+            return `<div class="bg-gray-950 p-3.5 rounded-xl border border-gray-800 shadow border-t-2 border-t-sky-500">${head}${body}</div>`;
+        }
+        function huluRefreshPipeUi(k) {
+            const p = hp(k), c = HULU_SITES[k], set = (id, v) => { const e = document.getElementById(id); if (e) e.innerHTML = v; };
+            const w = document.getElementById('hulu-weather'); if (w) w.innerHTML = huluWeatherHtml();
+            if (p.built && !p.ready) {
+                const left = Math.max(0, p.readyGt - gameNow()), total = pipeHours(k) * 3600000;
+                set('pipe-build-bar', huluBar((1 - left / total) * 100, 'bg-amber-500'));
+                set('pipe-build-left', `Sisa ±${fmtJam(left / 3600000)} waktu game`);
+            } else if (p.ready) {
+                const i = huluPipeInfo(k);
+                set('pipe-status', `<span class="inline-block w-2 h-2 rounded-full mr-1.5" style="background:${i.color}"></span>${i.label}`);
+                set('pipe-flowed', `${fmtN(p.flowed)} ${c.unit}`);
+                set('pipe-due', dShort(p.opexDueGt));
+                set('pipe-risk', p.leak ? '-' : (pipeLeakRate(k) * 100).toFixed(1).replace('.', ',') + '%/hari');
+                set('pipe-leaks', String(p.leaks) + 'x');
+                if (p.leak && p.repairDoneGt) set('pipe-repair-left', `<i class="fa-solid fa-screwdriver-wrench mr-1"></i>Perbaikan berlangsung, sisa ±${fmtJam(Math.max(0, p.repairDoneGt - gameNow()) / 3600000)} waktu game`);
+            }
+        }
         let huluUiSig = '';
         const huluBar = (pct, cls) => `<div class="w-full bg-gray-800 h-2 rounded-full overflow-hidden"><div class="${cls} h-full transition-all" style="width:${Math.max(0, Math.min(100, pct))}%"></div></div>`;
-        const huluSigNow = () => huluSel + '|' + HULU_KEYS.map(k => huluStatusInfo(k).key + hs(k).lvl).join(',');
+        const huluSigNow = () => huluSel + '|' + HULU_KEYS.map(k => huluStatusInfo(k).key + hs(k).lvl + huluPipeInfo(k).key).join(',') + '|' + (hulu.storm.kind || '-');
         function huluRender() {
             const root = document.getElementById('hulu-root'); if (!root) return;
             const k = huluSel, c = HULU_SITES[k], s = hs(k), st = huluStatusInfo(k);
@@ -315,12 +583,13 @@
                     </div></div>`;
             }
             root.innerHTML = `<div class="space-y-4">
+                <div id="hulu-weather" class="rounded-xl border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">${huluWeatherHtml()}</div>
                 <div class="grid grid-cols-3 gap-2">${cards}</div>
                 <div class="bg-gray-950 p-3.5 rounded-xl border border-gray-800 shadow border-t-2 border-t-${c.tone}-500">
                     <h3 class="text-xs font-bold text-${c.tone}-400 uppercase tracking-wider mb-1 flex items-center"><i class="fa-solid ${c.icon} mr-2"></i> ${esc(c.nama)}</h3>
                     <p class="text-[11px] text-gray-400 mb-2.5">${c.fuel === 'gas' ? 'Anjungan gas bumi lepas pantai. Hasilnya diangkut Kapal Tanker LPG dan masuk sebagai LPG Curah di Kilang Tuban.' : 'Anjungan minyak lepas pantai. Hasilnya diangkut Kapal Tanker BBM dan masuk ke stok minyak mentah Kilang Tuban.'} Ini tambahan: tombol beli di tab Kilang tetap bisa dipakai.</p>
                     <div class="flex items-center gap-2 text-[11px] mb-2"><span class="inline-block w-2 h-2 rounded-full" style="background:${st.color}"></span><span class="font-bold text-gray-200" id="hulu-status">${st.label}</span></div>
-                    ${body}</div>${ship}</div>`;
+                    ${body}</div>${huluPipeHtml(k)}${ship}</div>`;
             huluUiSig = huluSigNow();
             if (s.ready) huluPopulateShip();
             huluRefreshUi();
@@ -332,6 +601,7 @@
             if (huluUiSig !== huluSigNow()) return huluRender();
             const k = huluSel, c = HULU_SITES[k], s = hs(k), set = (id, v) => { const e = document.getElementById(id); if (e) e.innerHTML = v; };
             set('hulu-status', huluStatusInfo(k).label);
+            huluRefreshPipeUi(k);
             if (s.built && !s.ready) {
                 const left = Math.max(0, s.readyGt - gameNow()), total = c.buildHours * 3600000;
                 set('hulu-build-bar', huluBar((1 - left / total) * 100, 'bg-amber-500'));
@@ -348,4 +618,10 @@
         }
 
         // Produksi jalan tiap 3 detik nyata (nilai sebenarnya dihitung dari selisih jam game, bukan jumlah tick).
-        setInterval(() => { try { huluTick(); huluSyncMarkers(); huluRefreshUi(); } catch (e) { console.warn('Hulu tick error:', e); } }, 3000);
+        setInterval(() => {
+            try {
+                huluTick(); huluSyncMarkers(); huluRefreshUi();
+                // Stok Tuban naik terus selama pipa mengalir; renderRefineries() berat, jadi dibatasi tiap ±20 detik nyata.
+                if (huluFlowDirty && Date.now() - huluLastRefRender > 20000) { huluFlowDirty = false; huluLastRefRender = Date.now(); renderRefineries(); }
+            } catch (e) { console.warn('Hulu tick error:', e); }
+        }, 3000);
