@@ -1,19 +1,19 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
     import { getAnalytics, isSupported } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-analytics.js";
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged,
-             sendPasswordResetEmail, reauthenticateWithCredential, EmailAuthProvider, deleteUser, updateProfile
+             sendPasswordResetEmail, sendEmailVerification, reauthenticateWithCredential, EmailAuthProvider, deleteUser, updateProfile
            } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-auth.js";
     import { getFirestore, doc, setDoc, getDoc, deleteDoc, serverTimestamp, collection, query, where, onSnapshot, updateDoc, getDocs, orderBy, limit, writeBatch, runTransaction
            } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 
     const firebaseConfig = {
-        apiKey: "AIzaSyAokOJBi9KPoQZDEGNlZHU1RgBwMY6DNm4",
-        authDomain: "nusa-energi-manager-id.firebaseapp.com",
-        projectId: "nusa-energi-manager-id",
-        storageBucket: "nusa-energi-manager-id.firebasestorage.app",
-        messagingSenderId: "1018363998822",
-        appId: "1:1018363998822:web:aef36ec463cf412cfaf3a7",
-        measurementId: "G-TCT9SZ8QEJ"
+        apiKey: "AIzaSyCDtefVgfEl_Q-NFjrJOg7jB1lIusHFFLM",
+        authDomain: "migas-manager-indonesia.firebaseapp.com",
+        projectId: "migas-manager-indonesia",
+        storageBucket: "migas-manager-indonesia.firebasestorage.app",
+        messagingSenderId: "678967562740",
+        appId: "1:678967562740:web:b19c87b0a2032a7589a9a1",
+        measurementId: "G-YBSB580XD6"
     };
     const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
     // Analytics bersifat opsional; tidak boleh mengganggu game jika gagal (mis. dibuka via file://)
@@ -34,6 +34,9 @@
                 // dihapus lagi (rollback) supaya tidak ada akun nyangkut tanpa kode perusahaan yang valid.
                 await setDoc(doc(db, 'companyCodes', prof.code), { uid: user.uid, created: serverTimestamp() });
                 try { await setDoc(doc(db, 'users', user.uid), { ...prof, email, created: serverTimestamp() }); } catch (e) { console.warn('Firestore:', e); }
+                // Kirim email verifikasi (memakai template di Firebase Console). Gagal kirim TIDAK membatalkan
+                // pendaftaran - pemain bisa minta kirim ulang lewat tombol Masuk.
+                try { await sendEmailVerification(user); } catch (e) { console.warn('Kirim email verifikasi gagal:', e); }
                 return { user, profile: prof };
             } catch (err) {
                 if (user) { try { await deleteUser(user); } catch (e) { console.warn('Rollback user gagal:', e); } }
@@ -43,7 +46,23 @@
         saveCloud: (uid, data, ts) => setDoc(doc(db, 'saves', uid), { data, ts }),
         async loadSave(uid) { const s = await getDoc(doc(db, 'saves', uid)); return s.exists() ? s.data() : null; },
         deleteSave: uid => deleteDoc(doc(db, 'saves', uid)),
-        login: (email, pw) => signInWithEmailAndPassword(auth, email, pw),
+        // Login WAJIB email terverifikasi (Firestore Rules juga menolak akses tanpa email_verified).
+        // Kalau belum terverifikasi: kirim ulang link verifikasi, keluar, lalu lempar error 'app/email-not-verified'.
+        async login(email, pw) {
+            window.__regBusy = true;   // tahan onAuthStateChanged supaya tidak memulai sesi sebelum dicek
+            try {
+                const cred = await signInWithEmailAndPassword(auth, email, pw);
+                try { await cred.user.reload(); } catch (e) {}   // bisa jadi sudah diverifikasi di tab/perangkat lain
+                if (!cred.user.emailVerified) {
+                    try { await sendEmailVerification(cred.user); } catch (e) { console.warn('Kirim ulang verifikasi gagal:', e); }
+                    await signOut(auth);
+                    const err = new Error('EMAIL_NOT_VERIFIED'); err.code = 'app/email-not-verified'; throw err;
+                }
+                try { await cred.user.getIdToken(true); } catch (e) {}   // perbarui token agar klaim email_verified ikut terbaca Rules
+                window.__regBusy = false;
+                await handleUser(cred.user);
+            } finally { window.__regBusy = false; }
+        },
         out: () => signOut(auth),
         publishStats: (uid, d) => setDoc(doc(db, 'leaderboard', uid), { ...d, updated: serverTimestamp() }),
         listenBoard: cb => onSnapshot(query(collection(db, 'leaderboard'), orderBy('cash', 'desc'), limit(50)), sn => cb(sn.docs.map(x => ({ uid: x.id, ...x.data() }))), e => console.warn('Listener leaderboard:', e)),
@@ -125,12 +144,25 @@
         }
     };
 
-    // Sesi login otomatis dipulihkan Firebase saat halaman dibuka lagi
-    onAuthStateChanged(auth, async user => {
-        if (window.__regBusy) return;
-        if (!user) { authChecked = true; maybeFinish(); return; }
+    async function handleUser(user) {
         let prof = null;
         try { const snap = await getDoc(doc(db, 'users', user.uid)); prof = snap.exists() ? snap.data() : null; } catch (e) {}
         authChecked = true;
         window.fbSession(user, prof || { company: user.displayName || user.email, owner: '-' }, false);
+    }
+
+    // Sesi login otomatis dipulihkan Firebase saat halaman dibuka lagi
+    onAuthStateChanged(auth, async user => {
+        if (window.__regBusy) return;
+        if (!user) { authChecked = true; maybeFinish(); return; }
+        // Akun lama / sesi yang belum terverifikasi: cek ulang ke server, kalau tetap belum -> keluarkan.
+        try { await user.reload(); } catch (e) {}
+        if (!user.emailVerified) {
+            try { await signOut(auth); } catch (e) {}
+            authChecked = true; maybeFinish();
+            if (window.fbNeedVerify) window.fbNeedVerify();
+            return;
+        }
+        try { await user.getIdToken(true); } catch (e) {}
+        await handleUser(user);
     });

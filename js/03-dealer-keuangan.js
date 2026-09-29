@@ -105,7 +105,7 @@
         }
 
         function openDealerConfirm(name, cap, type, price, engine, axle, capText, kelas) {
-            pendingTruckPurchase = { name, cap, type, price, fee: regFee({ cap, price }), kelas: kelas || 'truk' };
+            pendingTruckPurchase = { name, cap, type, price, fee: regFee({ cap, price }), kelas: kelas || 'truk', qty: 1 };
             
             document.getElementById('dealer-spec-name').innerText = name;
             document.getElementById('dealer-spec-engine').innerText = engine;
@@ -114,7 +114,61 @@
             { const f = regFee({ cap, price }); document.getElementById('dealer-spec-price').innerHTML = formatRupiah(price) + `<br><span class="text-[10px] font-sans font-normal text-gray-400">+ Uji KIR ${formatRupiah(f.kir)} &middot; STNK ${formatRupiah(f.stnk)} &middot; Plat ${formatRupiah(f.plat)}</span><br><span class="text-[11px] font-sans text-amber-300">Total ${formatRupiah(price + f.total)}</span>`; }
 
             document.getElementById('btn-confirm-buy-truck').onclick = executeTruckPurchase;
+            renderDealerDepotOptions();
+            renderDealerQty();
             document.getElementById('dealer-modal').classList.remove('hidden');
+        }
+
+        // ===== PILIH PANGKALAN DEPO SAAT BELI (supaya tidak perlu Pindah Depot satu-satu) =====
+        // Semua depo yang sudah dibeli ditampilkan. Depo tanpa mekanik tampil nonaktif (aturan pangkalan armada sama
+        // seperti Pindah Depot di tab Armada). Pilihan terakhir diingat selama sesi supaya pembelian berikutnya langsung sama.
+        let lastDealerDepotId = 'KILANG-01';
+        function dealerDepotReady(k) { return !!(k && k.is_unlocked && k.mekanikId); }
+        function renderDealerDepotOptions() {
+            const sel = document.getElementById('dealer-depot-sel'); if (!sel) return;
+            const aktif = refineryData.filter(k => k.is_unlocked);
+            const siap = aktif.filter(dealerDepotReady);
+            const pilih = siap.some(k => k.id === lastDealerDepotId) ? lastDealerDepotId : 'KILANG-01';
+            sel.innerHTML = aktif.map(k => dealerDepotReady(k)
+                ? `<option value="${k.id}" ${k.id === pilih ? 'selected' : ''}>${esc(k.nama)}</option>`
+                : `<option value="${k.id}" disabled>${esc(k.nama)} (belum ada mekanik)</option>`).join('');
+            const tanpa = aktif.length - siap.length;
+            document.getElementById('dealer-depot-hint').innerHTML = tanpa
+                ? `<span class="text-amber-400"><i class="fa-solid fa-circle-info mr-1"></i>${tanpa} depo sudah dibeli tapi belum bisa dipilih: tugaskan mekanik dulu di tab Kilang.</span>`
+                : 'Unit langsung berpangkalan di depo ini, tanpa biaya mobilisasi.';
+        }
+
+        // ===== BELI BORONGAN (dealer) =====
+        // Diskon volume hanya untuk truk darat, dihitung dari harga unit (biaya KIR/STNK/plat tetap per unit).
+        // Kapal boleh borongan tapi tanpa diskon dan dibatasi 3 unit (harga sudah sangat besar).
+        const BULK_MAX_TRUK = 10, BULK_MAX_KAPAL = 3;
+        const bulkMax = k => k === 'kapal' ? BULK_MAX_KAPAL : BULK_MAX_TRUK;
+        const bulkDiscPct = (qty, kelas) => kelas === 'kapal' ? 0 : qty >= 8 ? 8 : qty >= 5 ? 5 : qty >= 3 ? 3 : 0;
+        function bulkQuote(pp) {
+            const disc = bulkDiscPct(pp.qty, pp.kelas);
+            const gross = pp.price * pp.qty;
+            const discAmt = Math.round(gross * disc / 100);
+            const fees = pp.fee.total * pp.qty;
+            return { disc, gross, discAmt, fees, total: gross - discAmt + fees };
+        }
+        function renderDealerQty() {
+            const pp = pendingTruckPurchase; if (!pp) return;
+            const q = bulkQuote(pp);
+            document.getElementById('dealer-qty').innerText = pp.qty;
+            document.getElementById('dealer-qty-minus').disabled = pp.qty <= 1;
+            document.getElementById('dealer-qty-plus').disabled = pp.qty >= bulkMax(pp.kelas);
+            document.getElementById('dealer-bulk-info').innerHTML =
+                `<div class="flex justify-between"><span class="text-gray-400">Harga unit x ${pp.qty}</span><span class="text-gray-200 font-mono">${formatRupiah(q.gross)}</span></div>` +
+                (q.disc ? `<div class="flex justify-between"><span class="text-emerald-400">Diskon borongan ${q.disc}%</span><span class="text-emerald-400 font-mono">-${formatRupiah(q.discAmt)}</span></div>` : '') +
+                `<div class="flex justify-between"><span class="text-gray-400">KIR + STNK + Plat x ${pp.qty}</span><span class="text-gray-200 font-mono">${formatRupiah(q.fees)}</span></div>` +
+                `<div class="flex justify-between border-t border-gray-800 pt-1 mt-1"><span class="text-gray-300 font-bold">Total Bayar</span><span class="text-amber-300 font-mono font-bold">${formatRupiah(q.total)}</span></div>` +
+                (pp.kelas !== 'kapal' && pp.qty < 8 ? `<div class="text-[10px] text-gray-500 mt-1">Diskon: 3 unit 3% &middot; 5 unit 5% &middot; 8 unit 8%</div>` : '');
+            document.getElementById('btn-confirm-buy-truck').innerText = pp.qty > 1 ? `Setujui & Beli ${pp.qty} Unit` : 'Setujui & Beli';
+        }
+        function changeDealerQty(d) {
+            const pp = pendingTruckPurchase; if (!pp) return;
+            pp.qty = Math.min(bulkMax(pp.kelas), Math.max(1, pp.qty + d));
+            renderDealerQty();
         }
 
         function closeDealerModal() {
@@ -124,51 +178,67 @@
 
         function executeTruckPurchase() {
             if (!pendingTruckPurchase) return;
-            
-            const { name, cap, type, price, fee, kelas } = pendingTruckPurchase;
 
-            if (companyCash < price + fee.total) {
+            const { name, cap, type, price, kelas, qty } = pendingTruckPurchase;
+            const fee = pendingTruckPurchase.fee;
+            const q = bulkQuote(pendingTruckPurchase);
+
+            if (companyCash < q.total) {
                 closeDealerModal();
-                showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(price + fee.total)} (harga unit ${formatRupiah(price)} + KIR/STNK/plat ${formatRupiah(fee.total)}).`, 'fa-triangle-exclamation', 'red');
+                showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(q.total)} (${qty} unit ${formatRupiah(q.gross - q.discAmt)} + KIR/STNK/plat ${formatRupiah(q.fees)}).`, 'fa-triangle-exclamation', 'red');
                 return;
             }
 
-            companyCash -= price + fee.total;
-            totalExpense += price + fee.total;
+            // Pangkalan yang dipilih (validasi ulang: harus depo aktif + punya mekanik, kalau tidak jatuh ke Tuban)
+            const selDepot = document.getElementById('dealer-depot-sel');
+            let depotTarget = refineryData.find(k => k.id === (selDepot && selDepot.value));
+            if (!dealerDepotReady(depotTarget)) depotTarget = refineryData[0];
+            lastDealerDepotId = depotTarget.id;
+
+            companyCash -= q.total;
+            totalExpense += q.total;
 
             const isKapal = kelas === 'kapal';
-            const randomPlat = isKapal ? 'GT ' + Math.floor(100 + Math.random() * 900) + ' NUSA' : 'W ' + Math.floor(1000 + Math.random() * 9000) + ' PK';
             const prefix = isKapal ? 'KPL-' : 'TRK-';
-            let truckNo = companyFleet.length + 1;
-            while (companyFleet.some(t => t.id === prefix + String(truckNo).padStart(2, '0'))) truckNo++;
-            const newTruckId = prefix + String(truckNo).padStart(2, '0');
+            const newUnits = [];
+            for (let i = 0; i < qty; i++) {
+                let randomPlat;
+                do { randomPlat = isKapal ? 'GT ' + Math.floor(100 + Math.random() * 900) + ' NUSA' : 'W ' + Math.floor(1000 + Math.random() * 9000) + ' PK'; }
+                while (companyFleet.some(t => t.plat === randomPlat));
+                let truckNo = companyFleet.length + 1;
+                while (companyFleet.some(t => t.id === prefix + String(truckNo).padStart(2, '0'))) truckNo++;
+                const newTruckId = prefix + String(truckNo).padStart(2, '0');
+                const newTruck = {
+                    id: newTruckId,
+                    name: name,
+                    cap: cap,
+                    type: type,
+                    kelas: isKapal ? 'kapal' : 'truk',
+                    status: 'Sedia',
+                    plat: randomPlat,
+                    depotId: depotTarget.id,
+                    odometer: 0, banPct: 100,
+                    price, kirTs: gameNow() + 182 * 86400000, stnkTs: gameNow() + STNK_PERIOD, platTs: gameNow() + PLAT_PERIOD, kirPending: null
+                };
+                companyFleet.push(newTruck);
+                newUnits.push(newTruck);
+                spawnOrderForNewTruck(newTruck);
+            }
 
-            const newTruck = {
-                id: newTruckId, 
-                name: name, 
-                cap: cap, 
-                type: type, 
-                kelas: isKapal ? 'kapal' : 'truk',
-                status: 'Sedia',
-                plat: randomPlat,
-                depotId: 'KILANG-01',
-                odometer: 0, banPct: 100,
-                price, kirTs: gameNow() + 182 * 86400000, stnkTs: gameNow() + STNK_PERIOD, platTs: gameNow() + PLAT_PERIOD, kirPending: null
-            };
-            companyFleet.push(newTruck);
-
-            addFinanceLog(`Pembelian ${name} (${newTruckId})`, -price);
-            addFinanceLog(`Uji KIR baru ${newTruckId}`, -fee.kir);
-            addFinanceLog(`STNK/BBN ${newTruckId}`, -fee.stnk);
-            addFinanceLog(`Pelat nomor ${randomPlat}`, -fee.plat);
-            spawnOrderForNewTruck(newTruck);
+            // Catatan keuangan: harga unit (sudah dikurangi diskon borongan) sebagai satu baris, biaya legalitas per unit
+            const idList = newUnits.length > 1 ? `${newUnits[0].id} s/d ${newUnits[newUnits.length - 1].id}` : newUnits[0].id;
+            addFinanceLog(`Pembelian ${qty}x ${name} (${idList})${q.disc ? ` diskon borongan ${q.disc}%` : ''}`, -(q.gross - q.discAmt));
+            addFinanceLog(`Uji KIR baru ${idList}`, -fee.kir * qty);
+            addFinanceLog(`STNK/BBN ${idList}`, -fee.stnk * qty);
+            addFinanceLog(`Pelat nomor ${qty} unit`, -fee.plat * qty);
             closeDealerModal();
             updateCashDisplay();
             populateTruckDropdowns();
             renderFleetDashboard();
 
-            addLog(`BERHASIL MEMBELI ARMADA: 1 Unit ${name} [${randomPlat}] ditambahkan ke garasi, berpangkalan di Kilang Tuban.`, 'success');
-            showModal('Pembelian Berhasil', `1 Unit ${name} [Plat: ${randomPlat}] berhasil dibeli!<br><br>STNK &amp; Plat Nomor aktif <b>5 tahun</b> sejak hari ini. Silakan assign ${isKapal ? 'Nahkoda & ABK' : 'driver'} saat hendak dispatch, dan atur pangkalan depo di tab Armada.`, 'fa-circle-check', 'blue');
+            const platList = newUnits.map(u => u.plat).join(', ');
+            addLog(`BERHASIL MEMBELI ARMADA: ${qty} Unit ${name} [${platList}] ditambahkan ke garasi, berpangkalan di ${depotTarget.nama}.${q.disc ? ` Diskon borongan ${q.disc}% (hemat ${formatRupiah(q.discAmt)}).` : ''}`, 'success');
+            showModal('Pembelian Berhasil', `${qty} Unit ${name} berhasil dibeli!<br><b>${newUnits.map(u => u.id + ' [' + u.plat + ']').join('<br>')}</b>${q.disc ? `<br><br>Diskon borongan ${q.disc}%: hemat <b>${formatRupiah(q.discAmt)}</b>.` : ''}<br><br>STNK &amp; Plat Nomor aktif <b>5 tahun</b> sejak hari ini. Pangkalan: <b>${esc(depotTarget.nama)}</b>. Silakan assign ${isKapal ? 'Nahkoda & ABK' : 'driver'} saat hendak dispatch.`, 'fa-circle-check');
         }
 
         function formatRupiah(amount) {

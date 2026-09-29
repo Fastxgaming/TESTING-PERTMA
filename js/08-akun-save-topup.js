@@ -27,7 +27,10 @@
         }
         function showMsg(id, msg, ok) { const el = document.getElementById(id); el.textContent = msg; el.className = 'mt-3 text-[11px] rounded-lg px-3 py-2 border ' + (ok ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30' : 'text-red-300 bg-red-500/10 border-red-500/30'); }
         function authError(msg) { showMsg('auth-error', msg, false); }
-        const fbErr = e => ({ 'auth/invalid-credential': 'Email atau password salah.', 'auth/wrong-password': 'Password salah.', 'auth/user-not-found': 'Email belum terdaftar.', 'auth/email-already-in-use': 'Email sudah terdaftar, silakan masuk.', 'auth/weak-password': 'Password minimal 6 karakter.', 'auth/invalid-email': 'Format email tidak valid.', 'auth/missing-password': 'Password wajib diisi.', 'auth/too-many-requests': 'Terlalu banyak percobaan, coba lagi nanti.', 'auth/network-request-failed': 'Koneksi internet bermasalah.', 'auth/requires-recent-login': 'Sesi kedaluwarsa, silakan keluar lalu masuk lagi.', 'permission-denied': 'Kode perusahaan barusan dipakai pemain lain. Coba lagi dengan kode lain.' }[e.code] || ('Terjadi kesalahan: ' + (e.code || e.message)));
+        const fbErr = e => ({ 'auth/invalid-credential': 'Email atau password salah.', 'auth/wrong-password': 'Password salah.', 'auth/user-not-found': 'Email belum terdaftar.', 'auth/email-already-in-use': 'Email sudah terdaftar, silakan masuk.', 'auth/weak-password': 'Password minimal 6 karakter.', 'auth/invalid-email': 'Format email tidak valid.', 'auth/missing-password': 'Password wajib diisi.', 'auth/too-many-requests': 'Terlalu banyak percobaan, coba lagi nanti.', 'auth/network-request-failed': 'Koneksi internet bermasalah.', 'auth/requires-recent-login': 'Sesi kedaluwarsa, silakan keluar lalu masuk lagi.', 'app/email-not-verified': 'Email belum diverifikasi. Link verifikasi sudah dikirim ulang ke email Anda - klik link itu (cek juga folder spam), lalu masuk lagi.', 'permission-denied': 'Kode perusahaan barusan dipakai pemain lain. Coba lagi dengan kode lain.' }[e.code] || ('Terjadi kesalahan: ' + (e.code || e.message)));
+
+        // Dipanggil modul Firebase bila sesi lama ditolak karena email belum diverifikasi
+        window.fbNeedVerify = () => showMsg('auth-error', 'Email akun ini belum diverifikasi. Masuk lagi untuk mengirim ulang link verifikasi.', false);
 
         function initAuth() { setAuthMode(store.get('pml_seen', false) ? 'login' : 'register'); }
 
@@ -47,8 +50,12 @@
                     if (pw !== pw2) return authError('Konfirmasi password tidak sama.');
                     const codeTaken = await fb.isCompanyCodeTaken(code).catch(() => false);
                     if (codeTaken) return authError(`Kode "${code}" sudah dipakai pemain lain, pakai kode lain.`);
-                    const { user, profile } = await fb.register(email, pw, { company, owner, code });
-                    fbSession(user, profile, true);
+                    await fb.register(email, pw, { company, owner, code });
+                    // Belum boleh masuk game sebelum email diverifikasi: keluar dulu, arahkan ke form Masuk.
+                    try { await fb.out(); } catch (e) {}
+                    setAuthMode('login');
+                    document.getElementById('log-email').value = email;
+                    showMsg('auth-error', 'Pendaftaran berhasil! Kami mengirim link verifikasi ke ' + email + '. Klik link itu (cek juga folder spam), lalu masuk.', true);
                 } else {
                     await fb.login(val('log-email'), document.getElementById('log-pass').value); // lanjut via onAuthStateChanged
                 }
@@ -410,7 +417,7 @@
             { id: 'p50m', label: 'Rp 50 Miliar', cash: 50e9, price: 70000, days: 30, tag: 'Hemat' },
             { id: 'p100m', label: 'Rp 100 Miliar', cash: 100e9, price: 100000, days: 30, tag: 'Terbaik' }
         ];
-        // Paket khusus panel admin: tidak melalui pembayaran, jadi tanpa harga (price) dan boleh sampai 1 Triliun
+        // Paket khusus panel admin: tidak melalui pembayaran, jadi tanpa harga (price) dan boleh sampai 10 Triliun
         const ADMIN_PKGS = [
             { id: 'a500j', label: 'Rp 500 Juta', cash: 500e6, price: 0, days: 5 },
             { id: 'a1m', label: 'Rp 1 Miliar', cash: 1e9, price: 0, days: 10 },
@@ -419,9 +426,10 @@
             { id: 'a50m', label: 'Rp 50 Miliar', cash: 50e9, price: 0, days: 30 },
             { id: 'a100m', label: 'Rp 100 Miliar', cash: 100e9, price: 0, days: 30 },
             { id: 'a500m', label: 'Rp 500 Miliar', cash: 500e9, price: 0, days: 30 },
-            { id: 'a1t', label: 'Rp 1 Triliun', cash: 1e12, price: 0, days: 30 }
+            { id: 'a1t', label: 'Rp 1 Triliun', cash: 1e12, price: 0, days: 30 },
+            { id: 'a10t', label: 'Rp 10 Triliun', cash: 10e12, price: 0, days: 30 }
         ];
-        const ADMIN_CASH_MAX = 1e12; // batas atas nominal khusus admin: 1 Triliun
+        const ADMIN_CASH_MAX = 10e12; // batas atas nominal khusus admin: 10 Triliun
         let appliedTopups = [], selTopup = null, topupBusy = false, topupUnsub = null, topupChain = Promise.resolve();
         let banUnsub = null;
         const topupInflight = new Set();

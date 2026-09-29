@@ -122,6 +122,7 @@
             document.getElementById('adm-only-check').checked = false;
             document.getElementById('adm-only-cash').checked = false;
             document.getElementById('adm-custom-cash').value = '';
+            document.getElementById('adm-custom-days').value = '';
             admToggleOnlyCheck();
             document.getElementById('admin-modal').classList.remove('hidden'); renderGrants(); renderBroadcastList();
         }
@@ -133,6 +134,7 @@
             if (only) document.getElementById('adm-only-cash').checked = false;
             document.getElementById('adm-pkg').disabled = only;
             document.getElementById('adm-custom-cash').disabled = only;
+            document.getElementById('adm-custom-days').disabled = false;
             admCustomPreview();
         }
         // Saat "hanya saldo" dicentang, saldo tetap dikirim (dari paket atau nominal khusus) tapi centang biru
@@ -144,17 +146,22 @@
                 document.getElementById('adm-pkg').disabled = false;
                 document.getElementById('adm-custom-cash').disabled = false;
             }
+            document.getElementById('adm-custom-days').disabled = onlyCash;
             admCustomPreview();
         }
         // Pratinjau nominal khusus yang akan dikirim (dibatasi maks ADMIN_CASH_MAX)
+        const ADMIN_DAYS_MAX = 3650; // batas atas durasi centang biru khusus admin: 10 tahun
+        function admSetDays(d) { const el = document.getElementById('adm-custom-days'); if (el.disabled) return; el.value = d; admCustomPreview(); }
+        function admCustomDays() { const n = parseInt(document.getElementById('adm-custom-days').value, 10); return n > 0 ? Math.min(n, ADMIN_DAYS_MAX) : 0; }
         function admCustomPreview() {
             const el = document.getElementById('adm-custom-preview');
-            if (document.getElementById('adm-only-check').checked) { el.textContent = 'Hanya kirim centang biru, saldo tidak dikirim.'; return; }
+            const cd = admCustomDays();
+            if (document.getElementById('adm-only-check').checked) { el.textContent = 'Hanya kirim centang biru' + (cd ? ' limited ' + cd + ' hari' : '') + ', saldo tidak dikirim.'; return; }
             const onlyCash = document.getElementById('adm-only-cash').checked;
             const raw = parseInt(document.getElementById('adm-custom-cash').value, 10);
-            if (!raw || raw <= 0) { el.textContent = onlyCash ? 'Saldo mengikuti nominal paket di atas, tanpa centang biru.' : ''; return; }
+            if (!raw || raw <= 0) { el.textContent = onlyCash ? 'Saldo mengikuti nominal paket di atas, tanpa centang biru.' : (cd ? 'Centang biru limited ' + cd + ' hari.' : ''); return; }
             const clamped = Math.min(raw, ADMIN_CASH_MAX);
-            el.textContent = 'Nominal terkirim: ' + rpFmt(clamped) + (raw > ADMIN_CASH_MAX ? ' (dibatasi maks 1 Triliun)' : '') + (onlyCash ? ', tanpa centang biru.' : '');
+            el.textContent = 'Nominal terkirim: ' + rpFmt(clamped) + (raw > ADMIN_CASH_MAX ? ' (dibatasi maks 10 Triliun)' : '') + (onlyCash ? ', tanpa centang biru.' : (cd ? ', centang biru limited ' + cd + ' hari.' : ''));
         }
         const admUid = () => document.getElementById('adm-uid').value.trim();
         async function adminLookup() {
@@ -181,13 +188,17 @@
             const onlyCash = document.getElementById('adm-only-cash').checked;
             const customRaw = parseInt(document.getElementById('adm-custom-cash').value, 10);
             let cash = pkg.cash, days = pkg.days, label = pkg.label;
+            const customDays = admCustomDays();
+            if (customDays > 0 && !onlyCash) days = customDays;
             if (onlyCheck) {
-                cash = 0; label = 'Centang biru saja (tanpa saldo)';
+                cash = 0; label = customDays > 0 ? 'Centang biru limited (tanpa saldo)' : 'Centang biru saja (tanpa saldo)';
             } else if (onlyCash) {
                 days = 0; label = pkg.label + ' (tanpa centang biru)';
                 if (customRaw > 0) { cash = Math.min(customRaw, ADMIN_CASH_MAX); label = rpFmt(cash) + ' (nominal khusus, tanpa centang biru)'; }
             } else if (customRaw > 0) {
                 cash = Math.min(customRaw, ADMIN_CASH_MAX); label = rpFmt(cash) + ' (nominal khusus)';
+            } else if (customDays > 0) {
+                label = pkg.label + ' (centang biru limited)';
             }
             const sendPkg = { id: pkg.id, label, cash, price: 0, days };
 
@@ -199,7 +210,7 @@
                 admMsg(`Berhasil dikirim ke ${pl.company || uid}. Pemain tinggal menekan Klaim di kotak Notifikasi Top Up.`, true);
                 showModal('Top Up Terkirim', `${sendPkg.label}${centangTxt} berhasil dikirim ke ${pl.company || uid}.`, 'fa-circle-check', 'blue');
                 document.getElementById('adm-uid').value = ''; document.getElementById('adm-note').value = ''; document.getElementById('adm-player').textContent = '';
-                document.getElementById('adm-only-check').checked = false; document.getElementById('adm-only-cash').checked = false; document.getElementById('adm-custom-cash').value = ''; admToggleOnlyCheck();
+                document.getElementById('adm-only-check').checked = false; document.getElementById('adm-only-cash').checked = false; document.getElementById('adm-custom-cash').value = ''; document.getElementById('adm-custom-days').value = ''; admToggleOnlyCheck();
                 renderGrants();
             } catch (e) { admMsg('Gagal mengirim: ' + (e.code || e.message), false); }
             finally { btn.disabled = false; }

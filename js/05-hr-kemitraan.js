@@ -12,19 +12,41 @@
             return { nama: (Math.random() < 0.6 ? 'PT ' : 'CV ') + NAMA_MITRA[Math.floor(Math.random() * NAMA_MITRA.length)], bulanan: MITRA_CFG.bulanan[k], rel: 0.6 + Math.random() * 0.37, due: gameNow() + MITRA_CFG.cycleDays * DAY_MS, telat: false, telatSejak: 0, lastDay: -1, lastTagih: -1, sejak: gameNow(), total: 0 };
         }
         function renderInvestorTab() { renderMitraSearch(); renderMitraActive(); }
+        // Tab wilayah di menu Mitra: 'ALL' = semua, selain itu = nama kota/region persis (field region SPBU).
+        let mitraRegion = 'ALL';
+        const regShort = r => String(r).replace(/\s*\(.*\)\s*$/, '');
+        function setMitraRegion(r) { mitraRegion = r; renderMitraSearch(); }
         function renderMitraSearch() {
             const c = document.getElementById('investor-spbu-list'); if (!c) return;
+            const tabs = document.getElementById('mitra-region-tabs');
             const q = (document.getElementById('mitra-q').value || '').toLowerCase().trim(), jf = document.getElementById('mitra-lpg').value;
-            const all = loadedSpbuList.filter(x => !x.is_approved && x.tipe === 'DODO' && (jf === 'ALL' || jenisKey(x) === jf) && (!q || `${x.region} ${x.provinsi} ${x.nama} ${x.kode}`.toLowerCase().includes(q)));
-            const list = all.slice(0, q ? 30 : 10);
+            const match = x => !x.is_approved && x.tipe === 'DODO' && (jf === 'ALL' || jenisKey(x) === jf) && (!q || `${x.region} ${x.provinsi} ${x.nama} ${x.kode}`.toLowerCase().includes(q));
+            // Hitung per wilayah: total SPBU, yang sudah aktif, dan yang masih menunggu izin (sesuai filter di atas).
+            const stat = new Map();
+            loadedSpbuList.forEach(x => {
+                let st = stat.get(x.region); if (!st) { st = { total: 0, aktif: 0, tersedia: 0 }; stat.set(x.region, st); }
+                st.total++; if (x.is_approved) st.aktif++; if (match(x)) st.tersedia++;
+            });
+            if (mitraRegion !== 'ALL' && !stat.has(mitraRegion)) mitraRegion = 'ALL';
+            const totalTersedia = [...stat.values()].reduce((n, st) => n + st.tersedia, 0);
+            const chip = (key, label, n, dim) => `<button onclick="setMitraRegion(decodeURIComponent('${encodeURIComponent(key)}'))" title="${esc(key)}" class="shrink-0 px-2 py-1 rounded-md border text-[10px] font-bold ${mitraRegion === key ? 'bg-pink-600 border-pink-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-300 hover:border-pink-500/60'} ${dim && mitraRegion !== key ? 'opacity-50' : ''}">${esc(label)} <span class="${mitraRegion === key ? 'text-pink-100' : 'text-pink-400'}">${n}</span></button>`;
+            if (tabs) tabs.innerHTML = chip('ALL', 'Semua', totalTersedia, false) + [...stat].map(([r, st]) => chip(r, regShort(r), st.tersedia, st.tersedia === 0)).join('');
+            const all = loadedSpbuList.filter(x => match(x) && (mitraRegion === 'ALL' || x.region === mitraRegion));
+            const list = mitraRegion === 'ALL' ? all.slice(0, q ? 30 : 10) : all;
             const kuota = `<div class="text-[10px] text-pink-300 bg-pink-500/10 border border-pink-500/30 rounded px-2 py-1">Kuota izin bulan ini: ${izinLog.mi === miNow() ? izinLog.n : 0}/${MITRA_CFG.maxIzinBulan}</div>`;
-            if (!list.length) { c.innerHTML = kuota + '<div class="empty-state"><i class="fa-solid fa-magnifying-glass"></i>Tidak ada lokasi tersedia untuk pencarian ini.</div>'; return; }
-            c.innerHTML = kuota + list.map(x => { const k = jenisKey(x); return `<div class="p-2.5 bg-gray-900 rounded-lg border border-gray-800 flex justify-between items-center gap-2">
+            let info = '';
+            if (mitraRegion !== 'ALL') {
+                const st = stat.get(mitraRegion), dB = depoOfRegion(mitraRegion, 'BBM'), dL = depoOfRegion(mitraRegion, 'LPG');
+                const depoTxt = d => d ? `${esc(d.nama)} ${d.is_unlocked ? '<span class="text-emerald-400">(aktif)</span>' : '<span class="text-red-400">(belum dibuka)</span>'}` : '<span class="text-red-400">tidak ada depo</span>';
+                info = `<div class="text-[10px] text-gray-300 bg-gray-900 border border-gray-800 rounded px-2 py-1.5"><b class="text-pink-300">${esc(regShort(mitraRegion))}</b>: ${st.total} SPBU &middot; ${st.aktif} aktif &middot; ${st.tersedia} menunggu izin<br>Depo BBM: ${depoTxt(dB)} &middot; Depo LPG: ${depoTxt(dL)}</div>`;
+            }
+            if (!list.length) { c.innerHTML = kuota + info + '<div class="empty-state"><i class="fa-solid fa-magnifying-glass"></i>Tidak ada lokasi tersedia untuk pilihan ini.</div>'; return; }
+            c.innerHTML = kuota + info + list.map(x => { const k = jenisKey(x); return `<div class="p-2.5 bg-gray-900 rounded-lg border border-gray-800 flex justify-between items-center gap-2">
                 <div class="min-w-0"><div class="text-[10px] text-purple-400 font-bold">${x.kode} <span class="${x.has_lpg ? 'text-amber-400' : 'text-gray-400'}">&middot; ${x.has_lpg ? 'SPBU + LPG' : 'SPBU tanpa LPG'}</span></div>
                 <div class="font-bold text-gray-200 text-xs truncate">${esc(x.nama)}</div><div class="text-[10px] text-gray-400">${esc(x.region)} &middot; ${esc(x.provinsi || '')}</div>
                 <div class="text-[10px] text-emerald-400">Izin ${formatRupiah(MITRA_CFG.izin[k])} &middot; Iuran ${formatRupiah(MITRA_CFG.bulanan[k])}/bln</div></div>
                 <button onclick="approveMitra('${x.kode}')" class="shrink-0 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-[10px] font-bold shadow">Setujui</button></div>`; }).join('')
-                + (all.length > list.length ? `<div class="text-[10px] text-gray-500 text-center">Menampilkan ${list.length} dari ${all.length}. Persempit pencarian.</div>` : '');
+                + (all.length > list.length ? `<div class="text-[10px] text-gray-500 text-center">Menampilkan ${list.length} dari ${all.length}. Pilih tab wilayah untuk melihat semuanya.</div>` : '');
         }
         function approveMitra(kode) {
             const x = loadedSpbuList.find(v => v.kode === kode); if (!x || x.is_approved) return;
@@ -171,7 +193,7 @@
                     <div class="pt-1 border-t border-gray-800">
                         ${busyIds.has(trk.id)
                             ? `<button disabled class="w-full bg-gray-800/60 text-gray-500 font-semibold py-1.5 rounded-lg text-[11px] cursor-not-allowed"><i class="fa-solid fa-truck-fast mr-1.5"></i>Sedang Bertugas &mdash; Tidak Bisa Dijual</button>`
-                            : `<button onclick="openSellModal('${trk.id}')" class="w-full bg-orange-600/90 hover:bg-orange-600 text-white font-semibold py-1.5 rounded-lg text-[11px] transition"><i class="fa-solid fa-right-left mr-1.5"></i>Jual ke Bursa P2P</button>`}
+                            : `<button onclick="openSellModal('${trk.id}')" class="w-full bg-orange-600/90 hover:bg-orange-600 text-white font-semibold py-1.5 rounded-lg text-[11px] transition"><i class="fa-solid fa-right-left mr-1.5"></i>Jual (Bursa P2P / Instan ke Server)</button>`}
                     </div>
                 </div>`;
         }

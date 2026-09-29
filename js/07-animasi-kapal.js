@@ -69,11 +69,21 @@
             flying.forEach(t => {
                 const f = Math.min(1, (now - t.e.startAt) / t.e.dur);
                 if (t.e.vehicle === 'truck' && f < 1) t.e.speedKmh = liveSpeedKmh(t, now);
-                const { i, ll } = posAt(t.pts, t.cum, f * t.total);
+                const sd = (t.e.ease ? seaEase(f) : f) * t.total;
+                const { i, ll } = posAt(t.pts, t.cum, sd);
                 t.marker.setLatLng(ll);
                 const tf = t.marker.getElement() && t.marker.getElement().querySelector('.tf');
                 const dLon = t.pts[Math.min(i + 1, t.pts.length - 1)][1] - t.pts[i][1];
-                if (tf && Math.abs(dLon) > 1e-5) tf.style.transform = dLon < 0 ? 'scaleX(-1)' : '';
+                if (tf && t.e.ease) {
+                    // Haluan kapal: arah diambil sedikit ke depan lalu diperhalus (lerp) supaya tidak menyentak di belokan.
+                    const ah = posAt(t.pts, t.cum, Math.min(t.total, sd + 4)).ll, dx = (ah[1] - ll[1]) * Math.cos(ll[0] * Math.PI / 180), dy = ah[0] - ll[0];
+                    if (Math.abs(dx) + Math.abs(dy) > 1e-7) {
+                        if (Math.abs(dx) > 1e-5) t.flip = dx < 0;
+                        const tgt = Math.atan2(dy, Math.abs(dx)) * 180 / Math.PI;
+                        t.tilt = (t.tilt || 0) + (tgt - (t.tilt || 0)) * 0.08;
+                    }
+                    tf.style.transform = `rotate(${(t.flip ? 1 : -1) * (t.tilt || 0)}deg) ${t.flip ? 'scaleX(-1)' : ''}`;
+                } else if (tf && Math.abs(dLon) > 1e-5) tf.style.transform = dLon < 0 ? 'scaleX(-1)' : '';
                 if (now - t.lastTrail > 150 || f === 1) {
                     // trail (solid, terang) = jejak yang SUDAH dilalui truk, dari titik berangkat sampai posisi sekarang.
                     t.trail.setLatLngs(t.pts.slice(0, i + 1).concat([ll]));
@@ -151,11 +161,7 @@
         // Pelayaran langsung Kilang Pusat <-> Depo Cabang Pesisir (kapal tanker curah): garis lurus laut, TIDAK lewat
         // logika jalan darat/ferry pulau seperti journey() di bawah - kapal tanker niaga jalan sendiri lewat rute laut.
         async function shipLeg(from, to, meta, fit) {
-            const pts = [[from.lat, from.lon], [to.lat, to.lon]];
-            const total = distKm(from, to);
-            const dur = (total / AVG_SHIP_SPEED_KMH) * (3600000 / GAME_SPEED);
-            await runVehicleLeg(pts, dur, { ...meta, vehicle: 'kapal', speedKmh: AVG_SHIP_SPEED_KMH }, fit);
-            return { km: total, dur };
+            return await shipVoyage(from, to, meta, fit); // lihat 07a-rute-laut.js
         }
         // Satu perjalanan lengkap dari titik A ke titik B, otomatis menyisipkan penyeberangan ferry bila beda pulau.
         // Alur: [darat ke pelabuhan] -> antre masuk kapal -> [penyeberangan] -> kapal sandar & antre turun -> [darat ke tujuan].
@@ -276,7 +282,7 @@
             const { spbu: target, truck, driver, kernet, nomorSJ } = d;
             const ids = [truck.id, driver.id, kernet.id];
             const muat = d.amount != null ? d.amount : truck.cap;
-            const info = creditKlgDelivery(target, muat);
+            const info = creditKlgDelivery(target, muat, d.neededType);
             const result = settleCrewResult(driver, kernet);
             if (result.fine) {
                 companyCash -= result.fine; totalExpense += result.fine;
@@ -284,7 +290,7 @@
             }
             // busyIds TIDAK dilepas di sini lagi - baru dilepas setelah kapal benar-benar sandar kembali di depot
             // asal (lihat animateKapalTransfer), supaya kapal tidak bisa ditugaskan dobel selagi masih berlayar pulang.
-            addLog(`TRANSFER SELESAI ${nomorSJ || ''}: ${muat.toLocaleString('id-ID')} ${target.unit} pasokan curah diturunkan di ${target.nama}. Stok kini ${Math.round(info.cur).toLocaleString()}/${info.max.toLocaleString()} ${info.unit}.`, 'success');
+            addLog(`TRANSFER SELESAI ${nomorSJ || ''}: ${muat.toLocaleString('id-ID')} ${d.neededType === 'LPG' ? 'Ton' : target.unit} pasokan curah diturunkan di ${target.nama}. Stok kini ${Math.round(info.cur).toLocaleString()}/${info.max.toLocaleString()} ${info.unit}.`, 'success');
             notify(`${truck.id} selesai bongkar muatan di ${target.nama}.`, 'ok');
             updateCashDisplay();
             renderRefineries();

@@ -239,7 +239,7 @@
         }
         function huluUpdateEstimate() {
             const el = document.getElementById('hulu-estimate'); if (!el) return;
-            const k = huluSel, c = HULU_SITES[k], s = hs(k), dest = huluDest(k), km = huluPathKm(k);
+            const k = huluSel, c = HULU_SITES[k], s = hs(k), dest = huluDest(k), km = seaKm(c, dest.tuban);
             const kapal = companyFleet.find(t => t.id === (document.getElementById('hulu-ship') || {}).value);
             const capU = kapal ? huluShipCap(k, kapal) : 0, load = kapal ? Math.floor(Math.min(capU, s.stok, dest.room)) : 0;
             el.innerHTML = `Jarak ke ${esc(dest.tuban.nama)}: <b>±${Math.round(km)} km laut</b> &middot; estimasi <b>${fmtJam(km / AVG_SHIP_SPEED_KMH)}</b> sekali jalan.` +
@@ -283,13 +283,8 @@
                            depoNama: origin.nama, tujuanNama: tuban.nama, nomorSJ: c.fuel === 'gas' ? 'GAS BUMI' : 'MINYAK MENTAH' };
             const fit = ownAnims === 1;
             const release = () => { ids.forEach(x => busyIds.delete(x)); populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard(); huluPopulateShip(); };
-            // Pelayaran per ruas lewat titik-titik jalur laut (tidak memotong daratan). rev=false: anjungan -> Tuban.
-            const sail = async (rev, fitFirst) => {
-                const pts = huluPath(site).map(x => ({ lat: x[0], lon: x[1] })); if (!rev) pts.reverse();
-                let km = 0;
-                for (let i = 1; i < pts.length; i++) { const l = await shipLeg(pts[i - 1], pts[i], meta, fitFirst && i === 1); km += l.km; }
-                return { km };
-            };
+            // Kapal berlayar di lajur pelayaran sendiri (07a-rute-laut.js) - TIDAK mengikuti garis pipa (huluPath dipakai khusus pipa).
+            const sail = (rev, fitFirst) => rev ? shipVoyage(tuban, c, meta, fitFirst) : shipVoyage(c, tuban, meta, fitFirst);
             try {
                 const leg = await sail(false, fit);
                 addLog(`SANDAR: Kapal ${truck.id} tiba di ${tuban.nama} (±${Math.round(leg.km)} km laut), kru bongkar ${c.jenis} (±${UNLOAD_SECONDS_KAPAL} detik)...`, 'info', 'truck');

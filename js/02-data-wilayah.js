@@ -9,7 +9,8 @@
           ['Sulawesi Tengah','ST',[['Palu',-0.8917,119.8707,5],['Poso',-1.395,120.752,3],['Luwuk',-0.95,122.787,3],['Donggala',-0.681,119.742,3]]],
           ['Sulawesi Barat','SB',[['Mamuju',-2.674,118.888,4],['Majene',-3.54,118.97,3],['Polewali Mandar',-3.432,119.343,3]]],
 ['Sulawesi Selatan','SS',[['Makassar',-5.1477,119.4327,7],['Gowa',-5.2159,119.4497,4],['Maros',-4.9887,119.5713,3],['Parepare',-4.0135,119.6255,3]]],
-          ['Kalimantan','KL',[['Balikpapan (Kaltim)',-1.2379,116.8529,6],['Samarinda (Kaltim)',-0.5022,117.1536,5],['Bontang (Kaltim)',0.1333,117.5,3],['Banjarmasin (Kalsel)',-3.3186,114.5944,5],['Banjarbaru (Kalsel)',-3.442,114.83,3],['Pontianak (Kalbar)',-0.0263,109.3425,5],['Singkawang (Kalbar)',0.906,108.987,3],['Palangka Raya (Kalteng)',-2.2161,113.9135,4],['Sampit (Kalteng)',-2.533,112.95,3],['Tarakan (Kaltara)',3.3,117.6333,3]]]
+          ['Kalimantan','KL',[['Balikpapan (Kaltim)',-1.2379,116.8529,6],['Samarinda (Kaltim)',-0.5022,117.1536,5],['Bontang (Kaltim)',0.1333,117.5,3],['Banjarmasin (Kalsel)',-3.3186,114.5944,5],['Banjarbaru (Kalsel)',-3.442,114.83,3],['Pontianak (Kalbar)',-0.0263,109.3425,5],['Singkawang (Kalbar)',0.906,108.987,3],['Palangka Raya (Kalteng)',-2.2161,113.9135,4],['Sampit (Kalteng)',-2.533,112.95,3],['Tarakan (Kaltara)',3.3,117.6333,3]]],
+          ['Jawa Timur','JT',[['Probolinggo',-7.7543,113.2159,4],['Lumajang',-8.1335,113.2246,4],['Bondowoso',-7.9135,113.8219,3]]]
         ];
         const JALAN = ['Jl. Jend. Sudirman','Jl. A. Yani','Jl. Diponegoro','Jl. Gatot Subroto','Jl. Raya Utara','Jl. Pahlawan','Jl. Imam Bonjol','Jl. Veteran','Jl. Merdeka','Jl. Pemuda','Jl. Hasanuddin','Jl. Ahmad Dahlan','Jl. Lingkar Kota','Jl. Trans Regional'];
         (function buildWilayah() {
@@ -25,8 +26,11 @@
         })();
 
         // Depo/TBBM regional (dibeli pemain, jadi titik berangkat truk terdekat)
-        refineryData.push(...[['TBBM Plumpang Jakarta',-6.1216,106.8967,25e9],['TBBM Tanjung Emas Semarang',-6.949,110.426,18e9],['TBBM Padalarang Bandung',-6.84,107.48,15e9],['TBBM Manggis Bali',-8.5,115.52,18e9],['TBBM Bitung Sulut',1.45,125.19,16e9],['TBBM Donggala Sulteng',-0.66,119.74,15e9],['Depo Mamuju Sulbar',-2.67,118.89,12e9],['TBBM Balikpapan Kaltim',-1.27,116.8,22e9],['TBBM Banjarmasin Kalsel',-3.29,114.57,15e9],['TBBM Pontianak Kalbar',-0.04,109.32,15e9],['Depo Palangka Raya Kalteng',-2.25,113.9,12e9],['Depo Tarakan Kaltara',3.31,117.62,14e9],['TBBM Makassar Sulsel',-5.14,119.43,20e9]]
+        refineryData.push(...[['TBBM Plumpang Jakarta',-6.1216,106.8967,25e9],['TBBM Tanjung Emas Semarang',-6.949,110.426,18e9],['TBBM Padalarang Bandung',-6.84,107.48,15e9],['TBBM Manggis Bali',-8.5,115.52,18e9],['TBBM Bitung Sulut',1.45,125.19,16e9],['TBBM Donggala Sulteng',-0.66,119.74,15e9],['Depo Mamuju Sulbar',-2.67,118.89,12e9],['TBBM Balikpapan Kaltim',-1.27,116.8,22e9],['TBBM Banjarmasin Kalsel',-3.29,114.57,15e9],['TBBM Pontianak Kalbar',-0.04,109.32,15e9],['Depo Palangka Raya Kalteng',-2.25,113.9,12e9],['Depo Tarakan Kaltara',3.31,117.62,14e9],['TBBM Makassar Sulsel',-5.14,119.43,20e9],['TBBM Ketapang Banyuwangi',-8.14,114.39,20e9]]
             .map((d, i) => ({ id: 'KILANG-' + String(4 + i).padStart(2, '0'), nama: d[0], tipe: 'Depo Cabang BBM', lat: d[1], lon: d[2], is_unlocked: false, stok_current: 0, stok_max: 100000, unit: 'Bbl', harga_beli: d[3] * 2, mekanikId: null })));
+
+        // TBBM Ketapang Banyuwangi (KILANG-17) melayani BBM sekaligus LPG (unit gauge tetap Bbl untuk BBL mentah).
+        refineryData.forEach(k => { if (k.nama === 'TBBM Ketapang Banyuwangi') k.tipe = 'Depo Cabang BBM & LPG'; });
 
         // ===== KAPASITAS DEPO PER JENIS PRODUK (Pusat & Cabang) =====
         // Setiap Kilang/Depo kini punya tangki terpisah per jenis BBM & LPG, masing-masing bisa di-upgrade sendiri.
@@ -47,7 +51,8 @@
         const KAP_GROUP = {
             'Pusat Utama': Object.keys(PRODUCT_META),
             'Depo Cabang BBM': ['pertalite', 'pertamax', 'pertamax_turbo', 'solar', 'dexlite'],
-            'Depo Cabang LPG': ['lpg_curah', 'lpg_tabung']
+            'Depo Cabang LPG': ['lpg_curah', 'lpg_tabung'],
+            'Depo Cabang BBM & LPG': ['pertalite', 'pertamax', 'pertamax_turbo', 'solar', 'dexlite', 'lpg_curah', 'lpg_tabung']
         };
         function initKapasitasDepo() {
             refineryData.forEach(k => {

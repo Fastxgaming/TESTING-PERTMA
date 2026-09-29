@@ -1,27 +1,47 @@
-        // ===== WILAYAH OTOMATIS: tiap SPBU di-assign ke Kilang/Depo AKTIF TERDEKAT berdasarkan radius jarak =====
-        // Menggantikan wilayah kabupaten/kota manual - dipanggil ulang tiap kali ada kilang/depo baru dibuka,
-        // supaya SPBU yang tadinya "jauh" bisa otomatis pindah wilayah begitu ada depo cabang lebih dekat.
-        // Kilang/Depo terdekat yang BENAR-BENAR bisa mensuplai jenis produk ini (Pusat Utama selalu bisa;
-        // Depo Cabang cuma bisa kalau tipenya cocok - mis. Depo LPG Gresik cuma bisa disebut wilayah LPG,
-        // bukan wilayah BBM, walau jaraknya paling dekat). Logika filter tipe disamakan dengan pickOrigin().
-        // Radius layanan realistis (km) per jenis produk - di luar radius ini, sebuah kilang/depo (termasuk
-        // Pusat Utama) TIDAK dianggap bisa mensuplai SPBU tsb, walau tidak ada kandidat lain yang lebih dekat.
-        // BBM disamakan dengan LPG (200 km) - SPBU yang jauh dari Kilang Pusat Tuban (mis. Jember) TIDAK dianggap
-        // terjangkau sampai ada TBBM/Depo cabang BBM yang lebih dekat dibuka.
-        const MAX_SERVICE_KM = { LPG: 200, BBM: 200 };
-        function nearestActiveKilang(spbu, type) {
-            const cap = MAX_SERVICE_KM[type] || Infinity;
-            return refineryData.filter(k => k.is_unlocked && (k.tipe.includes('Pusat') || k.tipe.includes(type)) && distKm(k, spbu) <= cap)
-                .reduce((best, k) => (!best || distKm(k, spbu) < distKm(best, spbu)) ? k : best, null);
+        // ===== WILAYAH DEPO TETAP: tiap kota/kabupaten sudah dipetakan ke SATU depo (bukan lagi berdasarkan jarak) =====
+        // Satu depo melayani beberapa kota. Kalau depo wilayahnya BELUM dibuka pemain, SPBU di kota itu
+        // dianggap TIDAK TERJANGKAU (tidak ada pesanan, tidak bisa dikirimi) sampai depo tersebut dibuka.
+        // Ubah pembagian wilayah cukup di dua tabel ini. Kunci = nama kota persis seperti di data SPBU (field region).
+        // BBM: Kilang Pusat Tuban & semua TBBM/Depo BBM cabang.
+        const COVER_BBM = {
+            'KILANG-01': ['Tuban & Bojonegoro (Area Kilang Utama)', 'Ngawi (Perbatasan Barat)', 'Lamongan', 'Madiun', 'Kediri'], // Kilang Tuban (Pusat)
+            'KILANG-02': ['Surabaya & Sidoarjo (Hub Perak)', 'Mojokerto', 'Malang', 'Blitar', 'Pamekasan'], // TBBM Perak Surabaya
+            'KILANG-04': ['Jakarta Pusat', 'Jakarta Utara', 'Jakarta Barat', 'Jakarta Selatan', 'Jakarta Timur', 'Bogor', 'Depok', 'Tangerang', 'Tangerang Selatan', 'Bekasi', 'Karawang'], // TBBM Plumpang
+            'KILANG-05': ['Semarang', 'Surakarta (Solo)', 'Magelang', 'Pekalongan', 'Tegal', 'Purwokerto', 'Kudus', 'Cilacap'], // TBBM Tanjung Emas Semarang
+            'KILANG-06': ['Bandung', 'Cirebon', 'Tasikmalaya', 'Sukabumi', 'Subang', 'Garut'], // TBBM Padalarang
+            'KILANG-07': ['Denpasar', 'Badung (Kuta)', 'Gianyar', 'Singaraja', 'Tabanan', 'Karangasem'], // TBBM Manggis Bali
+            'KILANG-08': ['Manado', 'Bitung', 'Tomohon', 'Kotamobagu'], // TBBM Bitung
+            'KILANG-09': ['Palu', 'Poso', 'Luwuk', 'Donggala'], // TBBM Donggala
+            'KILANG-10': ['Mamuju', 'Majene', 'Polewali Mandar'], // Depo Mamuju
+            'KILANG-11': ['Balikpapan (Kaltim)', 'Samarinda (Kaltim)', 'Bontang (Kaltim)'], // TBBM Balikpapan
+            'KILANG-12': ['Banjarmasin (Kalsel)', 'Banjarbaru (Kalsel)'], // TBBM Banjarmasin
+            'KILANG-13': ['Pontianak (Kalbar)', 'Singkawang (Kalbar)'], // TBBM Pontianak
+            'KILANG-14': ['Palangka Raya (Kalteng)', 'Sampit (Kalteng)'], // Depo Palangka Raya
+            'KILANG-15': ['Tarakan (Kaltara)'], // Depo Tarakan
+            'KILANG-16': ['Makassar', 'Gowa', 'Maros', 'Parepare'], // TBBM Makassar
+            'KILANG-17': ['Situbondo & Banyuwangi', 'Probolinggo', 'Bondowoso', 'Jember', 'Lumajang'] // TBBM Ketapang Banyuwangi
+        };
+        // LPG: hanya Kilang Pusat Tuban & Depo LPG Gresik yang menyuplai LPG. Kota di luar daftar ini = belum terjangkau LPG.
+        const COVER_LPG = {
+            'KILANG-01': ['Tuban & Bojonegoro (Area Kilang Utama)', 'Ngawi (Perbatasan Barat)', 'Lamongan', 'Madiun', 'Kediri'],
+            'KILANG-03': ['Surabaya & Sidoarjo (Hub Perak)', 'Mojokerto', 'Malang', 'Blitar', 'Pamekasan'], // Depo LPG Gresik
+            'KILANG-17': ['Situbondo & Banyuwangi', 'Probolinggo', 'Bondowoso', 'Jember', 'Lumajang'] // TBBM Ketapang Banyuwangi (BBM & LPG)
+        };
+        const _invertCover = c => { const m = {}; Object.entries(c).forEach(([id, ks]) => ks.forEach(k => { m[k] = id; })); return m; };
+        const DEPO_BBM_OF_REGION = _invertCover(COVER_BBM), DEPO_LPG_OF_REGION = _invertCover(COVER_LPG);
+        // Depo yang SEHARUSNYA melayani kota ini (dibuka atau belum). null = kota belum masuk pemetaan wilayah mana pun.
+        function depoOfRegion(region, type) {
+            const id = (type === 'LPG' ? DEPO_LPG_OF_REGION : DEPO_BBM_OF_REGION)[region];
+            return id ? (refineryData.find(k => k.id === id) || null) : null;
         }
         function recomputeWilayah() {
             loadedSpbuList.forEach(s => {
-                const bbm = nearestActiveKilang(s, 'BBM');
-                if (bbm) { s.wilayahBbmId = bbm.id; s.wilayahBbmNama = bbm.nama; s.wilayahBbmJarak = Math.round(distKm(bbm, s) * 10) / 10; }
+                const bbm = depoOfRegion(s.region, 'BBM');
+                if (bbm && bbm.is_unlocked) { s.wilayahBbmId = bbm.id; s.wilayahBbmNama = bbm.nama; s.wilayahBbmJarak = Math.round(distKm(bbm, s) * 10) / 10; }
                 else { s.wilayahBbmId = null; s.wilayahBbmNama = '-'; s.wilayahBbmJarak = null; }
                 if (s.has_lpg) {
-                    const lpg = nearestActiveKilang(s, 'LPG');
-                    if (lpg) { s.wilayahLpgId = lpg.id; s.wilayahLpgNama = lpg.nama; s.wilayahLpgJarak = Math.round(distKm(lpg, s) * 10) / 10; }
+                    const lpg = depoOfRegion(s.region, 'LPG');
+                    if (lpg && lpg.is_unlocked) { s.wilayahLpgId = lpg.id; s.wilayahLpgNama = lpg.nama; s.wilayahLpgJarak = Math.round(distKm(lpg, s) * 10) / 10; }
                     else { s.wilayahLpgId = null; s.wilayahLpgNama = '-'; s.wilayahLpgJarak = null; }
                 } else { s.wilayahLpgId = null; s.wilayahLpgNama = null; s.wilayahLpgJarak = null; }
                 // Alias wilayah utama = wilayah BBM (dipakai buat dropdown filter & tampilan umum, karena semua SPBU jual BBM).
@@ -93,7 +113,7 @@
                     card.innerHTML = `
                         <div class="flex justify-between text-xs">
                             <span class="text-gray-200 font-bold">${kilang.nama} <span class="text-[10px] text-blue-400 font-normal">(${kilang.tipe})</span> ${isCoastal(kilang) ? '<span class="text-[9px] text-cyan-400 font-normal" title="Punya akses pelabuhan, bisa dilayani kapal tanker"><i class="fa-solid fa-anchor"></i> Pesisir</span>' : '<span class="text-[9px] text-gray-500 font-normal" title="Tidak ada akses pelabuhan, hanya bisa dilayani truk"><i class="fa-solid fa-road"></i> Darat</span>'}${kilang.id === 'KILANG-01' ? `<span id="refine-indicator-${kilang.id}" class="${anyRefining ? '' : 'hidden'} text-[9px] text-amber-400 font-normal ml-1"><i class="fa-solid fa-gear fa-spin mr-0.5"></i>Mengolah...</span>` : ''}</span>
-                            <span id="crude-text-${kilang.id}" class="font-bold text-gray-200 font-mono">${kilang.stok_current.toLocaleString()} / ${kilang.stok_max.toLocaleString()} ${kilang.unit}</span>
+                            <span id="crude-text-${kilang.id}" class="font-bold text-white font-mono">${kilang.stok_current.toLocaleString()} / ${kilang.stok_max.toLocaleString()} ${kilang.unit}</span>
                         </div>
                         <div class="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
                             <div id="crude-bar-${kilang.id}" class="${anyRefining ? 'refine-flow' : ''} bg-emerald-500 h-full transition-all duration-500" style="width: ${pct}%"></div>
@@ -105,8 +125,7 @@
                     `;
 
                     if (kilang.id !== 'KILANG-01') {
-                        const kilangType = kilang.tipe.includes('LPG') ? 'LPG' : 'BBM';
-                        if (transferFuelFilter === 'ALL' || transferFuelFilter === kilangType) {
+                        if (transferFuelFilter === 'ALL' || kilang.tipe.includes(transferFuelFilter)) {
                             const opt = document.createElement('option');
                             opt.value = kilang.id;
                             opt.innerText = `${kilang.nama} (Sisa: ${kilang.stok_max - kilang.stok_current} ${kilang.unit})`;
@@ -255,7 +274,7 @@
             const b = (n, l) => `<button onclick="buyFuel(${n})" class="bg-teal-700 hover:bg-teal-600 text-white rounded px-2 py-1 font-bold">${l}</button>`;
             return `<div class="pt-1.5 border-t border-gray-800 space-y-1.5">
                 ${pct <= 25 ? '<div class="text-[10px] text-red-300 bg-red-500/10 border border-red-500/30 rounded px-2 py-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Stok bahan bakar menipis! Segera beli pasokan.</div>' : ''}
-                <div class="text-[10px] text-gray-400"><i class="fa-solid fa-gas-pump text-amber-400 mr-1"></i>Beli bahan bakar mentah &middot; ${formatRupiah(BBL_PRICE)}/Bbl</div>
+                <div class="text-[10px] text-gray-200"><i class="fa-solid fa-gas-pump text-amber-400 mr-1"></i>Beli bahan bakar mentah &middot; ${formatRupiah(BBL_PRICE)}/Bbl</div>
                 <div class="flex flex-wrap gap-1 text-[10px]">${b(10000, '+10.000 Bbl')}${b(50000, '+50.000 Bbl')}${b(100000, '+100.000 Bbl')}${b(500000, '+500.000 Bbl')}${b(1000000, '+1 Juta Bbl')}${b(0, 'Isi Penuh')}
                     ${atMax ? '' : `<button onclick="upgradeBblTangki('${kilang.id}')" class="bg-emerald-700 hover:bg-emerald-600 text-white rounded px-2 py-1 font-bold"><i class="fa-solid fa-arrow-up-right-dots"></i> Upgrade Tangki (${formatRupiah(bblUpgradeCost(kilang))})</button>`}
                 </div>
@@ -288,13 +307,13 @@
             return `<div class="pt-1.5 border-t border-gray-800 space-y-1.5">
                 <div class="flex justify-between text-xs">
                     <span class="text-gray-200 font-bold"><i class="fa-solid fa-fire-flame-simple text-orange-400 mr-1"></i>LPG Curah <span class="text-[10px] text-gray-500 font-normal">(Bahan Mentah)</span></span>
-                    <span id="lpgcurah-text-${kilang.id}" class="font-bold text-gray-200 font-mono">${slot.cur.toLocaleString('id-ID', { maximumFractionDigits: 1 })} / ${slot.max.toLocaleString('id-ID')} Ton</span>
+                    <span id="lpgcurah-text-${kilang.id}" class="font-bold text-white font-mono">${slot.cur.toLocaleString('id-ID', { maximumFractionDigits: 1 })} / ${slot.max.toLocaleString('id-ID')} Ton</span>
                 </div>
                 <div class="w-full bg-gray-800 h-2 rounded-full overflow-hidden">
                     <div id="lpgcurah-bar-${kilang.id}" class="bg-orange-500 h-full transition-all duration-500" style="width: ${pct}%"></div>
                 </div>
                 ${pct <= 25 ? '<div class="text-[10px] text-red-300 bg-red-500/10 border border-red-500/30 rounded px-2 py-1"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Stok LPG Curah menipis! Segera beli pasokan.</div>' : ''}
-                <div class="text-[10px] text-gray-400"><i class="fa-solid fa-fire-flame-simple text-orange-400 mr-1"></i>Beli LPG Curah &middot; ${formatRupiah(meta.buyPrice)}/Ton</div>
+                <div class="text-[10px] text-gray-200"><i class="fa-solid fa-fire-flame-simple text-orange-400 mr-1"></i>Beli LPG Curah &middot; ${formatRupiah(meta.buyPrice)}/Ton</div>
                 <div class="flex flex-wrap gap-1 text-[10px]">${b(200, '+200 Ton')}${b(1000, '+1.000 Ton')}${b(2000, '+2.000 Ton')}${b(0, 'Isi Penuh')}
                     ${atMax ? '' : `<button onclick="upgradeKapasitas('${kilang.id}','lpg_curah')" class="bg-emerald-700 hover:bg-emerald-600 text-white rounded px-2 py-1 font-bold"><i class="fa-solid fa-arrow-up-right-dots"></i> Upgrade Tangki (${formatRupiah(upCost)})</button>`}
                 </div>
@@ -650,7 +669,7 @@
                     ? `<span id="kap-refine-${kilang.id}-${key}" class="${slot.refining ? '' : 'hidden'} text-[8px] text-amber-300 font-semibold shrink-0 ml-1"><i class="fa-solid fa-industry fa-fade mr-0.5"></i>Diolah</span>`
                     : '';
                 const refineInfo = isBbmRefine
-                    ? `<div class="text-[9px] text-gray-500 mb-1"><i class="fa-solid fa-arrows-turn-right mr-1 text-amber-500"></i>Diolah dari stok BBL mentah lewat tombol Konversi &middot; butuh ${meta.refineRatio.toLocaleString('id-ID', { maximumFractionDigits: 2 })} Bbl mentah / ${meta.unit}</div>`
+                    ? `<div class="text-[9px] text-gray-300 mb-1"><i class="fa-solid fa-arrows-turn-right mr-1 text-amber-500"></i>Diolah dari stok BBL mentah lewat tombol Konversi &middot; butuh ${meta.refineRatio.toLocaleString('id-ID', { maximumFractionDigits: 2 })} Bbl mentah / ${meta.unit}</div>`
                     : '';
                 const convertBblRow = isBbmRefine
                     ? (slot.refining
@@ -664,8 +683,8 @@
                     : `<button onclick="upgradeKapasitas('${kilang.id}','${key}')" class="text-[9px] bg-emerald-700 hover:bg-emerald-600 text-white rounded px-1.5 py-0.5 font-semibold"><i class="fa-solid fa-arrow-up-right-dots"></i> Upgrade Tangki (${formatRupiah(cost)})</button>`;
                 return `<div class="text-[10px]">
                     <div class="flex justify-between items-center mb-0.5 gap-1">
-                        <span class="text-gray-300 font-semibold truncate flex items-center"><i class="fa-solid ${meta.icon} mr-1" style="color:${meta.color}"></i>${meta.label}${refineBadge}</span>
-                        <span id="kap-text-${kilang.id}-${key}" class="font-mono text-gray-400 shrink-0">${slot.cur.toLocaleString('id-ID', { maximumFractionDigits: 1 })}/${slot.max.toLocaleString('id-ID')} ${meta.unit}</span>
+                        <span class="text-gray-100 font-semibold truncate flex items-center"><i class="fa-solid ${meta.icon} mr-1" style="color:${meta.color}"></i>${meta.label}${refineBadge}</span>
+                        <span id="kap-text-${kilang.id}-${key}" class="font-mono text-[11px] font-bold text-white shrink-0">${slot.cur.toLocaleString('id-ID', { maximumFractionDigits: 1 })}/${slot.max.toLocaleString('id-ID')} ${meta.unit}</span>
                     </div>
                     <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mb-1">
                         <div id="kap-bar-${kilang.id}-${key}" class="${slot.refining ? 'refine-flow' : ''} h-full transition-all duration-500" style="width:${pct}%;background:${meta.color}"></div>
@@ -774,8 +793,9 @@
         // bukan ke gauge atas yang terpisah, supaya LPG curah yang dikirim beneran bisa diolah cabang.
         // Untuk Depo Cabang BBM, BBL mentah tetap masuk ke gauge atas (stok_current), sama seperti dipakai
         // convertBblKeProduk. Mengembalikan info tangki yang dikredit, untuk ditampilkan di log.
-        function creditKlgDelivery(target, amount) {
-            if (target.kap && target.kap.lpg_curah && target.tipe.includes('LPG')) {
+        function creditKlgDelivery(target, amount, type) {
+            const isLpg = type ? type === 'LPG' : target.tipe.includes('LPG');
+            if (target.kap && target.kap.lpg_curah && isLpg) {
                 const slot = target.kap.lpg_curah;
                 slot.cur = Math.min(slot.max, Math.round((slot.cur + amount) * 100) / 100);
                 return { cur: slot.cur, max: slot.max, unit: 'Ton' };
@@ -791,7 +811,8 @@
             const pusat = refineryData[0];
             const target = refineryData.find(k => k.id === targetId);
             if (!target) return { target: null, pusat, neededType: null, coastal: false };
-            const neededType = target.tipe.includes('LPG') ? 'LPG' : 'BBM';
+            const dual = target.tipe.includes('LPG') && target.tipe.includes('BBM');
+            const neededType = dual ? (transferFuelFilter === 'LPG' ? 'LPG' : 'BBM') : (target.tipe.includes('LPG') ? 'LPG' : 'BBM');
             return { target, pusat, neededType, coastal: isCoastal(pusat) && isCoastal(target) };
         }
 
@@ -879,6 +900,7 @@
             const wrapKapal = document.getElementById('transfer-kapal-wrap');
             const useKapal = wrapKapal && !wrapKapal.classList.contains('hidden');
             const { pusat, target, neededType } = info;
+            const unitMuat = neededType === 'LPG' ? 'Ton' : target.unit; // depo gabungan BBM&LPG: gauge Bbl, tapi muatan LPG dihitung Ton
 
             // ===== RUTE LAUT: Kapal Tanker (Kilang Pusat <-> Depo Pesisir), volume = kapasitas kapal, durasi = jarak laut =====
             if (useKapal) {
@@ -891,7 +913,7 @@
 
                 // Muatan = yang terkecil dari: kapasitas kapal, stok Kilang Tuban, dan ruang kosong di tangki depo tujuan
                 // (kapal besar tidak lagi butuh stok/ruang sebesar kapasitas penuhnya).
-                const roomTujuan = (target.kap && target.kap.lpg_curah && target.tipe.includes('LPG')) ? target.kap.lpg_curah.max - target.kap.lpg_curah.cur : target.stok_max - target.stok_current;
+                const roomTujuan = (target.kap && target.kap.lpg_curah && neededType === 'LPG') ? target.kap.lpg_curah.max - target.kap.lpg_curah.cur : target.stok_max - target.stok_current;
                 // Kapal LPG mengambil dari tangki LPG Curah Tuban; kapal BBM dari stok minyak mentah.
                 const srcLpg = neededType === 'LPG' && pusat.kap && pusat.kap.lpg_curah ? pusat.kap.lpg_curah : null;
                 const srcStok = () => srcLpg ? srcLpg.cur : pusat.stok_current;
@@ -900,8 +922,8 @@
                 if (muat < 1) return showModal('Stok Kurang', srcLpg ? 'Tangki LPG Curah Kilang Tuban kosong, tidak ada yang bisa dimuat kapal.' : 'Stok Kilang Tuban kosong, tidak ada yang bisa dimuat kapal.', 'fa-triangle-exclamation', 'red');
                 const bblUse = target.unit === 'KL' ? Math.ceil(muat * ECO.bblPerKl) : muat;
 
-                const d = { spbu: target, truck: kapal, driver: nahkoda, kernet: abk, origin: pusat, amount: muat };
-                openSuratJalanModal({ mode: 'KLG', tujuanNama: target.nama, tujuanKode: target.id, jenisMuatan: `${neededType} Curah (dari Kilang Pusat Tuban)`, volumeText: `${muat.toLocaleString('id-ID')} ${target.unit} (kapasitas kapal ${kapal.cap.toLocaleString('id-ID')})`,
+                const d = { spbu: target, truck: kapal, driver: nahkoda, kernet: abk, origin: pusat, amount: muat, neededType };
+                openSuratJalanModal({ mode: 'KLG', tujuanNama: target.nama, tujuanKode: target.id, jenisMuatan: `${neededType} Curah (dari Kilang Pusat Tuban)`, volumeText: `${muat.toLocaleString('id-ID')} ${unitMuat} (kapasitas kapal ${kapal.cap.toLocaleString('id-ID')})`,
                     truck: kapal, driver: nahkoda, kernet: abk, labels: { truk: 'Unit Kapal Tanker', plat: 'No. Registrasi', driver: 'Nahkoda Bertugas', kernet: 'ABK Pendamping' },
                     execute: (nomorSJ) => {
                         if (srcStok() < (srcLpg ? muat : bblUse)) return showModal('Stok Kurang', 'Stok Kilang Tuban tidak mencukupi!', 'fa-triangle-exclamation', 'red');
@@ -909,8 +931,8 @@
                         renderRefineries();
                         d.nomorSJ = nomorSJ;
                         animateKapalTransfer(d);
-                        addLog(`SURAT JALAN ${nomorSJ}: Kapal ${kapal.id} [Nahkoda: ${nahkoda.name}] DITANDATANGANI & BERLAYAR membawa ${muat.toLocaleString('id-ID')} ${target.unit} ${neededType} curah ke ${target.nama}.`, 'purple');
-                        showModal('Kapal Berangkat', `Surat Jalan ${nomorSJ} telah ditandatangani. ${kapal.id} resmi berlayar membawa ${muat.toLocaleString('id-ID')} ${target.unit} ke ${target.nama}.\nStok depo tujuan bertambah otomatis setelah kapal tiba & kru selesai bongkar muatan.`, 'fa-ship', 'blue');
+                        addLog(`SURAT JALAN ${nomorSJ}: Kapal ${kapal.id} [Nahkoda: ${nahkoda.name}] DITANDATANGANI & BERLAYAR membawa ${muat.toLocaleString('id-ID')} ${unitMuat} ${neededType} curah ke ${target.nama}.`, 'purple');
+                        showModal('Kapal Berangkat', `Surat Jalan ${nomorSJ} telah ditandatangani. ${kapal.id} resmi berlayar membawa ${muat.toLocaleString('id-ID')} ${unitMuat} ke ${target.nama}.\nStok depo tujuan bertambah otomatis setelah kapal tiba & kru selesai bongkar muatan.`, 'fa-ship', 'blue');
                     } });
                 return;
             }
@@ -921,20 +943,20 @@
             const bblUse = target.unit === 'KL' ? Math.ceil(amount * ECO.bblPerKl) : amount;
             if (pusat.stok_current < bblUse) return showModal('Stok Kurang', `Stok Kilang Tuban tidak mencukupi!`, 'fa-triangle-exclamation', 'red');
 
-            openSuratJalanModal({ mode: 'KLG', tujuanNama: target.nama, tujuanKode: target.id, jenisMuatan: `${neededType} (dari Kilang Pusat Tuban, jalur darat)`, volumeText: `${amount.toLocaleString()} ${target.unit}`,
+            openSuratJalanModal({ mode: 'KLG', tujuanNama: target.nama, tujuanKode: target.id, jenisMuatan: `${neededType} (dari Kilang Pusat Tuban, jalur darat)`, volumeText: `${amount.toLocaleString()} ${unitMuat}`,
                 execute: (nomorSJ) => {
                     if (pusat.stok_current < bblUse) {
                         showModal('Stok Kurang', 'Stok Kilang Tuban tidak mencukupi!', 'fa-triangle-exclamation', 'red');
                         return;
                     }
                     pusat.stok_current -= bblUse;
-                    creditKlgDelivery(target, amount);
+                    creditKlgDelivery(target, amount, neededType);
 
                     renderRefineries();
                     document.getElementById('transfer-amount-input').value = '';
 
-                    addLog(`SURAT JALAN ${nomorSJ}: TRANSFER PASOKAN DARAT ${amount.toLocaleString()} ${target.unit} dikirim dari Tuban ke ${target.nama}.`, 'purple');
-                    showModal('Transfer Berhasil', `Surat Jalan ${nomorSJ} telah ditandatangani. Berhasil mentransfer ${amount.toLocaleString()} ${target.unit} ${neededType} ke ${target.nama} lewat jalur darat.`, 'fa-truck-arrow-right', 'blue');
+                    addLog(`SURAT JALAN ${nomorSJ}: TRANSFER PASOKAN DARAT ${amount.toLocaleString()} ${unitMuat} dikirim dari Tuban ke ${target.nama}.`, 'purple');
+                    showModal('Transfer Berhasil', `Surat Jalan ${nomorSJ} telah ditandatangani. Berhasil mentransfer ${amount.toLocaleString()} ${unitMuat} ${neededType} ke ${target.nama} lewat jalur darat.`, 'fa-truck-arrow-right', 'blue');
                 } });
         }
 
@@ -972,8 +994,8 @@
                         <div class="text-[10px] font-bold text-blue-700">${spbu.kode}</div>
                         <strong class="text-xs font-bold block">${spbu.nama}</strong>
                         <div class="text-[10px] text-gray-600">Kab/Kota: ${spbu.region}</div>
-                        <div class="text-[10px] text-gray-600">Wilayah BBM Terdekat: <b>${spbu.wilayahBbmNama || '-'}</b>${spbu.wilayahBbmJarak != null ? ` (&plusmn;${spbu.wilayahBbmJarak} km)` : ''}</div>
-                        ${spbu.has_lpg ? `<div class="text-[10px] text-gray-600">Wilayah LPG Terdekat: <b>${spbu.wilayahLpgNama || '-'}</b>${spbu.wilayahLpgJarak != null ? ` (&plusmn;${spbu.wilayahLpgJarak} km)` : ''}</div>` : ''}
+                        <div class="text-[10px] text-gray-600">Wilayah BBM (Depo): <b>${spbu.wilayahBbmNama || '-'}</b>${spbu.wilayahBbmJarak != null ? ` (&plusmn;${spbu.wilayahBbmJarak} km)` : ''}</div>
+                        ${spbu.has_lpg ? `<div class="text-[10px] text-gray-600">Wilayah LPG (Depo): <b>${spbu.wilayahLpgNama || '-'}</b>${spbu.wilayahLpgJarak != null ? ` (&plusmn;${spbu.wilayahLpgJarak} km)` : ''}</div>` : ''}
                         <div class="text-[10px] text-gray-600">Keramaian: <b>${TRAFFIC[spbu.traffic || (spbu.traffic = pickTraffic())].label}</b> &middot; konsumsi BBM/LPG ${TRAFFIC[spbu.traffic].mult}x</div>
                         <div class="text-[10px] text-gray-600">${spbu.tipe === 'COCO' ? 'Milik perusahaan (dikelola swasta)' : 'Mitra: ' + esc(spbu.mitra ? spbu.mitra.nama : '-')}${spbu.has_lpg ? ' &middot; + LPG' : ''}</div>
                         ${spbu.blocked ? '<div class="text-[10px] font-bold text-red-600">DIBLOKIR - operasional off</div>' : ''}
