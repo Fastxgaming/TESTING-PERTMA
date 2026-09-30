@@ -1,6 +1,6 @@
         // ===== KEMITRAAN: izin, tagihan bulanan, blokir otomatis =====
         const DAY_MS = 86400000;
-        const MITRA_CFG = { cycleDays: 30, graceDays: 10, izin: { BBM: 60e6, LPG: 100e6 }, bulanan: { BBM: 6e6, LPG: 10e6 }, setorCoco: { BBM: 1.5e6, LPG: 2.5e6 }, maxIzinBulan: 20 };
+        const MITRA_CFG = { cycleDays: 30, graceDays: 10, izin: { BBM: 35e6, LPG: 60e6 }, ambil: { BBM: 17.5e6, LPG: 30e6 }, /* izin & ambil = BIAYA yang dibayar perusahaan */ bulanan: { BBM: 6e6, LPG: 10e6 }, setorCoco: { BBM: 1.5e6, LPG: 2.5e6 }, maxIzinBulan: 20 };
         let izinLog = { mi: -1, n: 0 };
         const miNow = () => Math.floor((gameNow() - GAME_START) / (MITRA_CFG.cycleDays * DAY_MS));
         let lastSetor = 0;
@@ -44,22 +44,24 @@
             c.innerHTML = kuota + info + list.map(x => { const k = jenisKey(x); return `<div class="p-2.5 bg-gray-900 rounded-lg border border-gray-800 flex justify-between items-center gap-2">
                 <div class="min-w-0"><div class="text-[10px] text-purple-400 font-bold">${x.kode} <span class="${x.has_lpg ? 'text-amber-400' : 'text-gray-400'}">&middot; ${x.has_lpg ? 'SPBU + LPG' : 'SPBU tanpa LPG'}</span></div>
                 <div class="font-bold text-gray-200 text-xs truncate">${esc(x.nama)}</div><div class="text-[10px] text-gray-400">${esc(x.region)} &middot; ${esc(x.provinsi || '')}</div>
-                <div class="text-[10px] text-emerald-400">Izin ${formatRupiah(MITRA_CFG.izin[k])} &middot; Iuran ${formatRupiah(MITRA_CFG.bulanan[k])}/bln</div></div>
+                <div class="text-[10px] text-amber-400">Biaya izin ${formatRupiah(MITRA_CFG.izin[k])} &middot; Iuran ${formatRupiah(MITRA_CFG.bulanan[k])}/bln</div></div>
                 <button onclick="approveMitra('${x.kode}')" class="shrink-0 bg-purple-600 hover:bg-purple-700 text-white px-3 py-1.5 rounded text-[10px] font-bold shadow">Setujui</button></div>`; }).join('')
                 + (all.length > list.length ? `<div class="text-[10px] text-gray-500 text-center">Menampilkan ${list.length} dari ${all.length}. Pilih tab wilayah untuk melihat semuanya.</div>` : '');
         }
         function approveMitra(kode) {
+            if (pphBlokir()) return;
             const x = loadedSpbuList.find(v => v.kode === kode); if (!x || x.is_approved) return;
             const k = jenisKey(x), fee = MITRA_CFG.izin[k];
             if (izinLog.mi !== miNow()) izinLog = { mi: miNow(), n: 0 };
             if (izinLog.n >= MITRA_CFG.maxIzinBulan) return showModal('Kuota Izin Habis', `Maksimal ${MITRA_CFG.maxIzinBulan} izin mitra baru per bulan game. Coba lagi bulan depan.`, 'fa-ban', 'red');
+            if (companyCash < fee) return showModal('Kas Tidak Cukup', `Biaya izin mitra ${x.nama} adalah ${formatRupiah(fee)}. Kas perusahaan tidak mencukupi.`, 'fa-triangle-exclamation', 'red');
             izinLog.n++;
-            x.is_approved = true; x.blocked = false; x.mitra = newMitra(x); x.mitra.total = fee;
-            companyCash += fee; totalIncome += fee; addFinanceLog(`Biaya izin mitra ${x.mitra.nama} - ${x.nama}`, fee); updateCashDisplay();
+            x.is_approved = true; x.blocked = false; x.mitra = newMitra(x); x.mitra.total = 0;
+            companyCash -= fee; totalExpense += fee; addFinanceLog(`Biaya izin mitra ${x.mitra.nama} - ${x.nama}`, -fee); updateCashDisplay();
             renderSpbuOnMap(); populateSpbuDropdowns(); renderInvestorTab();
             map.flyTo([x.lat, x.lon], 11);
-            addLog(`PERIZINAN DISETUJUI: ${x.nama} (${x.mitra.nama}) aktif di peta. Biaya izin ${formatRupiah(fee)} diterima.`, 'purple');
-            showModal('Kemitraan Disetujui', `${x.nama} (${x.mitra.nama}) kini aktif${x.has_lpg ? ' dengan outlet LPG' : ''}. Biaya izin ${formatRupiah(fee)} diterima; iuran ${formatRupiah(x.mitra.bulanan)}/bulan jatuh tempo ${dShort(x.mitra.due)}.`, 'fa-circle-check', 'purple');
+            addLog(`PERIZINAN DISETUJUI: ${x.nama} (${x.mitra.nama}) aktif di peta. Biaya izin ${formatRupiah(fee)} dibayar.`, 'purple');
+            showModal('Kemitraan Disetujui', `${x.nama} (${x.mitra.nama}) kini aktif${x.has_lpg ? ' dengan outlet LPG' : ''}. Biaya izin ${formatRupiah(fee)} dibayar; iuran ${formatRupiah(x.mitra.bulanan)}/bulan jatuh tempo ${dShort(x.mitra.due)}.`, 'fa-circle-check', 'purple');
         }
         function revokeMitra(x) {
             x.blocked = true; x.blockedAt = gameNow();
@@ -82,10 +84,15 @@
             m.telat = false; m.due = (late ? gameNow() : m.due) + MITRA_CFG.cycleDays * DAY_MS; updateCashDisplay();
         }
         async function takeOverSpbu(kode) {
+            if (pphBlokir()) return;
             const x = loadedSpbuList.find(v => v.kode === kode); if (!x || !x.blocked) return;
-            if (!(await showConfirm(`Ambil alih ${x.nama}? Tunggakan mitra dihapus, SPBU menjadi milik perusahaan dan dikelola swasta.`, { title: 'Ambil Alih SPBU', iconClass: 'fa-hand-holding-dollar', theme: 'blue', okLabel: 'Ambil Alih' }))) return;
+            const fee = MITRA_CFG.ambil[jenisKey(x)];
+            if (companyCash < fee) return showModal('Kas Tidak Cukup', `Biaya ambil alih ${x.nama} adalah ${formatRupiah(fee)}. Kas perusahaan tidak mencukupi.`, 'fa-triangle-exclamation', 'red');
+            if (!(await showConfirm(`Ambil alih ${x.nama} seharga ${formatRupiah(fee)}? Tunggakan mitra dihapus, SPBU menjadi milik perusahaan dan dikelola swasta.`, { title: 'Ambil Alih SPBU', iconClass: 'fa-hand-holding-dollar', theme: 'blue', okLabel: 'Bayar & Ambil Alih' }))) return;
+            if (companyCash < fee) return;
+            companyCash -= fee; totalExpense += fee; addFinanceLog(`Biaya ambil alih ${x.nama}`, -fee); updateCashDisplay();
             x.mitraLama = x.mitra && x.mitra.nama; delete x.mitra; x.blocked = false; x.tipe = 'COCO'; x.taken = true;
-            addLog(`AMBIL ALIH: ${x.nama} kini milik perusahaan & dikelola swasta.`, 'success');
+            addLog(`AMBIL ALIH: ${x.nama} kini milik perusahaan & dikelola swasta. Biaya ${formatRupiah(fee)} dibayar.`, 'success');
             renderSpbuOnMap(); populateSpbuDropdowns(); renderInvestorTab();
             showModal('Berhasil Diambil Alih', `${x.nama} aktif kembali sebagai SPBU perusahaan (dikelola swasta) dan memberi setoran bulanan.`, 'fa-circle-check', 'blue');
         }
@@ -123,7 +130,7 @@
             const order = x => x.blocked ? 0 : x.mitra.telat ? 1 : 2;
             c.innerHTML = ms.length ? ms.sort((a, b) => order(a) - order(b)).map(x => {
                 const m = x.mitra; let badge, extra = '', btn = '';
-                if (x.blocked) { badge = '<span class="text-red-400 font-bold">DIBLOKIR</span>'; extra = `<div class="text-[10px] text-red-300">Lisensi dicabut ${dShort(x.blockedAt)} &middot; operasional off</div>`; btn = `<button onclick="takeOverSpbu('${x.kode}')" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded text-[10px] font-bold">Ambil Alih</button>`; }
+                if (x.blocked) { badge = '<span class="text-red-400 font-bold">DIBLOKIR</span>'; extra = `<div class="text-[10px] text-red-300">Lisensi dicabut ${dShort(x.blockedAt)} &middot; operasional off</div>`; btn = `<button onclick="takeOverSpbu('${x.kode}')" class="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded text-[10px] font-bold">Ambil Alih &middot; ${formatRupiah(MITRA_CFG.ambil[jenisKey(x)])}</button>`; }
                 else if (m.telat) { const d = Math.floor((now - m.telatSejak) / DAY_MS); badge = `<span class="text-amber-400 font-bold">MENUNGGAK ${d}/${MITRA_CFG.graceDays} hari</span>`; extra = `<div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mt-1"><div class="bg-red-500 h-full" style="width:${Math.min(100, d / MITRA_CFG.graceDays * 100)}%"></div></div>`; btn = `<button onclick="tagihMitra('${x.kode}')" class="bg-amber-600 hover:bg-amber-700 text-white px-2.5 py-1 rounded text-[10px] font-bold">Tagih</button>`; }
                 else { badge = '<span class="text-emerald-400 font-bold">AKTIF</span>'; extra = `<div class="text-[10px] text-gray-500">Tagihan berikut ${dShort(m.due)} &middot; ${formatRupiah(m.bulanan)}</div>`; }
                 return `<div class="p-2.5 bg-gray-900 rounded-lg border ${x.blocked ? 'border-red-500/50' : 'border-gray-800'} flex justify-between items-center gap-2"><div class="min-w-0 flex-1"><div class="text-[10px]">${badge} <span class="text-gray-500">&middot; ${esc(m.nama)}${x.has_lpg ? ' &middot; +LPG' : ''}</span></div><div class="font-bold text-gray-200 text-xs truncate">${esc(x.nama)}</div><div class="text-[10px] text-gray-400">${esc(x.region)}</div>${extra}</div>${btn}</div>`;
@@ -133,141 +140,196 @@
 
         // DASHBOARD 1: TAB KHUSUS FISIK ARMADA
         // Susun satu kartu armada (dipakai di dalam kelompok jenis+pangkalan pada renderFleetDashboard)
+        // ===== Status surat kendaraan (KIR, STNK, Plat, Balik Nama) =====
+        const docDays = ts => Math.ceil((ts - gameNow()) / DAY_MS);
+        function docChip(ts) {
+            const d = docDays(ts);
+            if (d <= 0) return '<span class="px-2 py-0.5 rounded border font-bold text-red-300 bg-red-500/10 border-red-500/40"><i class="fa-solid fa-circle-xmark mr-1"></i>Kedaluwarsa</span>';
+            if (d < 30) return `<span class="px-2 py-0.5 rounded border font-bold text-amber-300 bg-amber-500/10 border-amber-500/40"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Segera habis (${d} Hari)</span>`;
+            return `<span class="px-2 py-0.5 rounded border font-bold text-emerald-300 bg-emerald-500/10 border-emerald-500/40"><i class="fa-solid fa-check mr-1"></i>Aktif (${d} Hari)</span>`;
+        }
+        // 'bad' = ada dokumen kedaluwarsa, 'warn' = segera habis / belum balik nama, 'ok' = semua beres
+        function suratState(t) {
+            const days = [t.kirTs, t.stnkTs, t.platTs].map(docDays);
+            if (days.some(d => d <= 0)) return 'bad';
+            if (days.some(d => d < 30) || perluBalikNama(t)) return 'warn';
+            return 'ok';
+        }
+        function suratNote(t) {
+            const n = [t.kirTs, t.stnkTs, t.platTs].filter(ts => docDays(ts) <= 0).length;
+            if (n) return `${n} dokumen kedaluwarsa`;
+            if (perluBalikNama(t)) return 'Belum balik nama';
+            if ([t.kirTs, t.stnkTs, t.platTs].some(ts => docDays(ts) < 30)) return 'Ada yang segera habis';
+            return 'Lengkap';
+        }
+
+        // DASHBOARD 1: TAB KHUSUS FISIK ARMADA
+        // Satu kartu armada, ringkas: baris label-nilai. Surat (KIR/STNK/Plat/Balik Nama) dibuka lewat tombol surat.
         function fleetCardHtml(trk) {
                 const depot = refineryData.find(k => k.id === trk.depotId) || refineryData[0];
                 const depotOptions = refineryData.filter(k => k.is_unlocked && k.mekanikId)
-                    .map(k => `<option value="${k.id}" ${k.id === trk.depotId ? 'selected' : ''}>${k.nama}</option>`).join('');
+                    .map(k => `<option value="${k.id}" ${k.id === trk.depotId ? 'selected' : ''}>${esc(k.nama)}</option>`).join('');
+                const row = (l, v) => `<div class="flex justify-between items-center gap-2"><span class="text-gray-400">${l}</span><span class="text-right">${v}</span></div>`;
+                const isKapal = trk.kelas === 'kapal', st = suratState(trk), belum = perluBalikNama(trk);
+                const stCls = { ok: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10', warn: 'text-amber-300 border-amber-500/50 bg-amber-500/10', bad: 'text-red-300 border-red-500/50 bg-red-500/10' }[st];
+                const dot = { ok: 'bg-emerald-400', warn: 'bg-amber-400', bad: 'bg-red-500' }[st];
 
-                return `<div class="bg-gray-900 border border-gray-800 rounded-xl p-3 space-y-2.5">
+                return `<div class="bg-gray-900 border border-gray-800 rounded-xl p-3 space-y-2">
                     <div class="flex justify-between items-center border-b border-gray-800 pb-2">
-                        <div>
-                            <span class="text-[10px] font-mono bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded border border-blue-800">${trk.id}</span>
-                            <h4 class="font-bold text-gray-200 text-xs inline-block ml-1.5">${trk.name}</h4>
+                        <div class="min-w-0">
+                            <span class="text-[10px] font-mono bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded border border-blue-800">${esc(trk.id)}</span>
+                            <h4 class="font-bold text-gray-200 text-xs inline-block ml-1.5">${esc(trk.name)}</h4>
+                            ${trk.julukan ? `<div class="text-[11px] text-amber-300 font-semibold mt-1"><i class="fa-solid fa-signature mr-1 text-amber-400/70"></i>"${esc(trk.julukan)}"</div>` : ''}
                         </div>
-                        <span class="font-mono font-bold text-amber-400 text-xs bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">${trk.plat}</span>
+                        <span class="shrink-0 font-mono font-bold text-amber-400 text-xs bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">${esc(trk.plat)}</span>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-2 text-[10px]">
-                        <div class="bg-gray-950 p-2 rounded border border-gray-800 col-span-2">
-                            ${trk.kelas === 'kapal' ? `
-                            <div class="flex justify-between items-center">
-                                <span class="text-gray-400"><i class="fa-solid fa-route mr-1 text-gray-500"></i>Jarak Tempuh: <b class="text-gray-200 font-mono">${trk.odometer.toLocaleString('id-ID')} km</b></span>
-                                <span class="text-gray-400"><i class="fa-solid fa-gauge-high mr-1 text-gray-500"></i>Kondisi Mesin: <b class="${banCls(trk.banPct)} font-mono">${trk.banPct}%</b></span>
-                            </div>
-                            <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mt-1"><div class="${banBar(trk.banPct)} h-full" style="width:${trk.banPct}%"></div></div>
-                            <div class="text-[9px] text-gray-500 mt-0.5">Kapal tidak pakai ban - ini kondisi mesin &amp; lambung, diservis otomatis begitu sandar di depot kalau sudah menipis.</div>
-                            ` : `
-                            <div class="flex justify-between items-center">
-                                <span class="text-gray-400"><i class="fa-solid fa-road mr-1 text-gray-500"></i>Odometer: <b class="text-gray-200 font-mono">${trk.odometer.toLocaleString('id-ID')} km</b></span>
-                                <span class="text-gray-400"><i class="fa-solid fa-circle-dot mr-1 text-gray-500"></i>Ban: <b class="${banCls(trk.banPct)} font-mono">${trk.banPct}%</b></span>
-                            </div>
-                            <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mt-1"><div class="${banBar(trk.banPct)} h-full" style="width:${trk.banPct}%"></div></div>
-                            <div class="text-[9px] text-gray-500 mt-0.5">Ban otomatis diganti kru bengkel begitu tiba di depot kalau sisa &le;${TIRE_REPLACE_THRESHOLD}%.</div>
-                            `}
-                        </div>
-                        <div class="bg-gray-950 p-2 rounded border border-gray-800">
-                            <span class="text-gray-400 block">Masa Uji KIR:</span>
-                            <span class="font-semibold ${docCls(trk.kirTs)} font-mono">${docTxt(trk.kirTs)}</span>
-                            ${trk.kirPending
-                                ? `<div class="mt-1 text-amber-400 font-sans"><i class="fa-solid fa-hourglass-half mr-1"></i>Diverifikasi Dishub, selesai ${fmtTime(trk.kirPending)}</div>`
-                                : `<button onclick="renewDoc('${trk.id}','kir')" class="block mt-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded px-2 py-0.5 font-sans">Kirim ke Dishub ${formatRupiah(kirRenewCost(trk))}</button>`}
-                        </div>
-                        <div class="bg-gray-950 p-2 rounded border border-gray-800">
-                            <span class="text-gray-400 block">STNK Aktif (5 th):</span>
-                            <span class="font-semibold ${docCls(trk.stnkTs)} font-mono">${docTxt(trk.stnkTs)}</span>
-                            <button onclick="renewDoc('${trk.id}','stnk')" class="block mt-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded px-2 py-0.5 font-sans">Perpanjang ${formatRupiah(stnkRenewCost(trk))}</button>
-                        </div>
-                        <div class="bg-gray-950 p-2 rounded border border-gray-800">
-                            <span class="text-gray-400 block">Plat Nomor (5 th):</span>
-                            <span class="font-semibold ${docCls(trk.platTs)} font-mono">${docTxt(trk.platTs)}</span>
-                            <button onclick="renewDoc('${trk.id}','plat')" class="block mt-1 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded px-2 py-0.5 font-sans">Perpanjang ${formatRupiah(platRenewCost(trk))}</button>
-                        </div>
-                        <div class="bg-gray-950 p-2 rounded border border-gray-800">
-                            <span class="text-gray-400 block">Pangkalan Depo:</span>
-                            <span class="font-semibold text-teal-300">${depot ? depot.nama : '-'}</span>
-                            <select id="depot-sel-${trk.id}" class="w-full mt-1 bg-gray-900 border border-gray-700 rounded px-1 py-0.5 text-gray-200 font-sans">${depotOptions}</select>
-                            <button onclick="pindahDepot('${trk.id}')" class="block mt-1 w-full bg-gray-800 hover:bg-gray-700 text-gray-200 rounded px-2 py-0.5 font-sans">Pindah Depot ${formatRupiah(DEPOT_MOVE_FEE)}</button>
-                        </div>
+                    <div class="bg-gray-950 p-2.5 rounded-lg border border-gray-800 space-y-1.5 text-[11px]">
+                        ${row(isKapal ? 'Jarak Tempuh:' : 'Odometer:', `<b class="text-gray-200 font-mono">${trk.odometer.toLocaleString('id-ID')} km</b>`)}
+                        ${row(isKapal ? 'Kondisi Mesin:' : 'Ban:', `<b class="${banCls(trk.banPct)} font-mono">${trk.banPct}%</b>`)}
+                        <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden"><div class="${banBar(trk.banPct)} h-full" style="width:${trk.banPct}%"></div></div>
+                        ${isKapal ? shipStatusBlock(trk) : truckFuelHtml(trk)}
+                        ${row('Pangkalan:', `<b class="text-teal-300">${depot ? esc(depot.nama) : '-'}</b>`)}
+                        ${row('Atas Nama:', `<b class="${belum ? 'text-amber-400' : 'text-gray-200'}">${esc(trk.pemilik || '-')}</b>${belum ? ' <span class="text-[9px] text-amber-400 border border-amber-500/40 rounded px-1 py-0.5 ml-1">Belum balik nama</span>' : ''}`)}
+                        <div class="text-[9px] text-gray-500">${isKapal ? `Kapal diservis otomatis begitu sandar di depot kalau kondisi mesin &le;${SHIP_SERVICE_AT}% (${formatRupiah(shipServiceCost(trk))}).` : `Ban otomatis diganti kru bengkel begitu tiba di depot kalau sisa &le;${TIRE_REPLACE_THRESHOLD}%.`}</div>
                     </div>
 
-                    <div class="pt-1 border-t border-gray-800">
+                    <div class="flex gap-1.5 text-[10px]">
+                        <input id="julukan-${esc(trk.id)}" type="text" maxlength="24" value="${esc(trk.julukan || '')}" placeholder="Julukan unit (opsional)" class="min-w-0 flex-1 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-gray-200 font-sans">
+                        <button onclick="simpanJulukan('${esc(trk.id)}')" class="shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded px-2.5 py-1 font-sans">Simpan</button>
+                    </div>
+                    <div class="flex gap-1.5 text-[10px]">
+                        <select id="depot-sel-${esc(trk.id)}" class="min-w-0 flex-1 bg-gray-950 border border-gray-700 rounded px-1 py-1 text-gray-200 font-sans">${depotOptions}</select>
+                        <button onclick="pindahDepot('${esc(trk.id)}')" class="shrink-0 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded px-2.5 py-1 font-sans">Pindah ${formatRupiah(DEPOT_MOVE_FEE)}</button>
+                    </div>
+
+                    <div class="pt-1 border-t border-gray-800 flex gap-1.5">
+                        <button onclick="openSuratModal('${esc(trk.id)}')" title="${docLbl(trk).tombol}" class="relative flex-1 min-w-0 border ${stCls} font-semibold py-1.5 rounded-lg text-[11px] transition hover:brightness-125">
+                            <i class="fa-solid fa-envelope-open-text mr-1.5"></i>Surat &middot; ${suratNote(trk)}
+                            <span class="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${dot} ${st === 'ok' ? 'hidden' : ''}"></span>
+                        </button>
                         ${busyIds.has(trk.id)
-                            ? `<button disabled class="w-full bg-gray-800/60 text-gray-500 font-semibold py-1.5 rounded-lg text-[11px] cursor-not-allowed"><i class="fa-solid fa-truck-fast mr-1.5"></i>Sedang Bertugas &mdash; Tidak Bisa Dijual</button>`
-                            : `<button onclick="openSellModal('${trk.id}')" class="w-full bg-orange-600/90 hover:bg-orange-600 text-white font-semibold py-1.5 rounded-lg text-[11px] transition"><i class="fa-solid fa-right-left mr-1.5"></i>Jual (Bursa P2P / Instan ke Server)</button>`}
+                            ? `<button disabled title="Sedang bertugas" class="shrink-0 px-3 bg-gray-800/60 text-gray-500 rounded-lg text-[11px] cursor-not-allowed"><i class="fa-solid fa-truck-fast"></i></button>`
+                            : belum
+                            ? `<button disabled title="Belum balik nama, tidak bisa dijual" class="shrink-0 px-3 bg-gray-800/60 text-gray-500 rounded-lg text-[11px] cursor-not-allowed"><i class="fa-solid fa-lock"></i></button>`
+                            : `<button onclick="openSellModal('${esc(trk.id)}')" title="Jual (Bursa P2P / Instan ke Server)" class="shrink-0 px-3 bg-orange-600/90 hover:bg-orange-600 text-white rounded-lg text-[11px] transition"><i class="fa-solid fa-right-left"></i></button>`}
                     </div>
                 </div>`;
         }
 
-        const FLEET_CATS = [
-            { key: 'truk-bbm', label: 'Truk BBM', icon: 'fa-truck', match: t => t.kelas !== 'kapal' && t.type === 'BBM' },
-            { key: 'truk-lpg', label: 'Truk LPG', icon: 'fa-truck-ramp-box', match: t => t.kelas !== 'kapal' && t.type === 'LPG' },
+        // ===== Modal Surat Kendaraan =====
+        let suratModalId = null;
+        function openSuratModal(id) {
+            if (!companyFleet.some(t => t.id === id)) return;
+            suratModalId = id; renderSuratModal();
+            document.getElementById('surat-kendaraan-modal').classList.remove('hidden');
+        }
+        function closeSuratModal() {
+            suratModalId = null;
+            document.getElementById('surat-kendaraan-modal').classList.add('hidden');
+        }
+        function renderSuratModal() {
+            const box = document.getElementById('surat-kendaraan-body'); if (!box || !suratModalId) return;
+            const t = companyFleet.find(x => x.id === suratModalId);
+            if (!t) return closeSuratModal();   // unit sudah terjual / keluar garasi
+            const belum = perluBalikNama(t), L = docLbl(t);
+            const hd = document.getElementById('surat-kendaraan-head'); if (hd) hd.textContent = L.head;
+            const btn = (cls, onclick, label, disabled) => `<button ${disabled ? 'disabled' : `onclick="${onclick}"`} class="w-full mt-2 ${disabled ? 'bg-gray-800/60 text-gray-500 cursor-not-allowed' : cls} font-bold py-2 rounded-lg text-[11px] transition">${label}</button>`;
+            const card = (icon, title, chip, extra, action) => `<div class="bg-gray-950 border border-gray-800 rounded-xl p-3">
+                <div class="flex justify-between items-center gap-2 text-xs"><span class="font-bold text-gray-200"><i class="fa-solid ${icon} mr-1.5 text-gray-500"></i>${title}</span><span class="text-[10px]">${chip}</span></div>
+                ${extra ? `<div class="text-[10px] text-gray-400 mt-1.5">${extra}</div>` : ''}${action}</div>`;
+            document.getElementById('surat-kendaraan-title').textContent = `${t.id} \u00b7 ${t.plat}`;
+            document.getElementById('surat-kendaraan-sub').textContent = t.name;
+            box.innerHTML =
+                card('fa-file-signature', `Balik Nama (${L.bpkb})`,
+                    belum ? '<span class="px-2 py-0.5 rounded border font-bold text-amber-300 bg-amber-500/10 border-amber-500/40"><i class="fa-solid fa-triangle-exclamation mr-1"></i>Belum</span>'
+                          : '<span class="px-2 py-0.5 rounded border font-bold text-emerald-300 bg-emerald-500/10 border-emerald-500/40"><i class="fa-solid fa-check mr-1"></i>Atas nama PT Anda</span>',
+                    `Atas nama: <b class="text-gray-200">${esc(t.pemilik || '-')}</b>${belum ? '<br>Unit bekas Bursa P2P. Selama belum balik nama, unit tidak bisa dijual ke Bursa P2P maupun Instan ke Server.' : ''}`,
+                    belum ? btn('bg-amber-600 hover:bg-amber-700 text-white', `balikNama('${esc(t.id)}')`, `<i class="fa-solid fa-file-signature mr-1.5"></i>Balik Nama ${formatRupiah(balikNamaCost(t))}`) : '') +
+                card('fa-clipboard-check', L.kirCard, docChip(t.kirTs),
+                    `Berlaku hingga ${dShort(t.kirTs)}${t.kirPending ? `<br><span class="text-amber-400"><i class="fa-solid fa-hourglass-half mr-1"></i>Diverifikasi ${L.badan}, selesai ${fmtTime(t.kirPending)}</span>` : ''}`,
+                    btn('bg-gray-800 hover:bg-gray-700 text-gray-200', `renewDoc('${esc(t.id)}','kir')`, t.kirPending ? `Sedang Diproses ${L.badan}` : `Kirim ke ${L.badan} ${formatRupiah(kirRenewCost(t))}`, !!t.kirPending)) +
+                card('fa-id-card', L.stnkCard, docChip(t.stnkTs), `Berlaku hingga ${dShort(t.stnkTs)}`,
+                    btn('bg-gray-800 hover:bg-gray-700 text-gray-200', `renewDoc('${esc(t.id)}','stnk')`, `Perpanjang ${formatRupiah(stnkRenewCost(t))}`)) +
+                card('fa-rectangle-list', L.platCard, docChip(t.platTs), `Berlaku hingga ${dShort(t.platTs)}`,
+                    btn('bg-gray-800 hover:bg-gray-700 text-gray-200', `renewDoc('${esc(t.id)}','plat')`, `Perpanjang ${formatRupiah(platRenewCost(t))}`));
+        }
+
+        function simpanJulukan(truckId) {
+            const t = companyFleet.find(x => x.id === truckId), inp = document.getElementById('julukan-' + truckId); if (!t || !inp) return;
+            t.julukan = cleanJulukan(inp.value);
+            addLog(t.julukan ? `JULUKAN: ${t.id} [${t.plat}] kini dijuluki "${t.julukan}".` : `JULUKAN: julukan ${t.id} [${t.plat}] dihapus.`, 'info');
+            populateTruckDropdowns(); renderFleetDashboard(); saveGame();
+        }
+
+        // Struktur Armada: lokasi (Kilang Tuban / Depo Cabang) -> kelompok jenis unit -> kartu.
+        // Urutan kelompok SAMA di kedua lokasi supaya rapi: Truk BBM, Truk LPG, Truk BBL (antar depo), Kapal.
+        const FLEET_GROUPS = [
+            { key: 'truk-bbm', label: 'Truk BBM', icon: 'fa-truck', match: t => isSpbuTruck(t) && t.type === 'BBM' },
+            { key: 'truk-lpg', label: 'Truk LPG', icon: 'fa-truck-ramp-box', match: t => isSpbuTruck(t) && t.type === 'LPG' },
+            { key: 'truk-depo', label: 'Truk BBL (Antar Depo)', icon: 'fa-oil-can', match: t => t.kelas === 'depo' },
             { key: 'kapal', label: 'Kapal', icon: 'fa-ship', match: t => t.kelas === 'kapal' }
         ];
-        let fleetCatFilter = 'ALL', fleetDepotFilter = 'ALL';
-        function setFleetCat(key) { fleetCatFilter = key; fleetDepotFilter = 'ALL'; renderFleetDashboard(); }
+        const fleetDepotOf = trk => refineryData.find(k => k.id === trk.depotId && k.is_unlocked) || null;
+        const fleetLocOf = trk => { const d = fleetDepotOf(trk); return d && d.id === 'KILANG-01' ? 'TUBAN' : 'CABANG'; };
+        let fleetLocTab = null, fleetDepotFilter = 'ALL';
+        function setFleetLoc(key) { fleetLocTab = key; fleetDepotFilter = 'ALL'; renderFleetDashboard(); }
         function setFleetDepot(key) { fleetDepotFilter = key; renderFleetDashboard(); }
         function renderFleetDashboard() {
             const container = document.getElementById('fleet-list-container');
-            container.innerHTML = '';
+            const locTabs = document.getElementById('fleet-cat-tabs'), depotTabs = document.getElementById('fleet-depot-tabs');
             if (!companyFleet.length) {
-                document.getElementById('fleet-cat-tabs').innerHTML = '';
-                document.getElementById('fleet-depot-tabs').innerHTML = '';
-                container.innerHTML = '<div class="empty-state"><i class="fa-solid fa-truck-fast"></i>Belum punya armada. Beli truk di tab Dealer Armada (biaya KIR, STNK &amp; plat ikut dibayar).</div>'; return;
+                locTabs.innerHTML = ''; depotTabs.innerHTML = '';
+                container.innerHTML = '<div class="empty-state"><i class="fa-solid fa-truck-fast"></i>Belum punya armada. Beli truk di tab Dealer Armada (biaya KIR, STNK &amp; plat ikut dibayar).</div>';
+                if (suratModalId) renderSuratModal(); return;
             }
-
-            // Chip kategori: klik "Kapal" supaya cuma kapal yang tampil, dst. Klik langsung judul kelompoknya juga sama efeknya.
-            document.getElementById('fleet-cat-tabs').innerHTML = [{ key: 'ALL', label: 'Semua', icon: 'fa-layer-group' }, ...FLEET_CATS].map(c =>
-                `<button onclick="setFleetCat('${c.key}')" class="flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-bold border transition ${fleetCatFilter === c.key ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200'}"><i class="fa-solid ${c.icon}"></i>${c.label}</button>`
-            ).join('');
-
-            const catsToShow = fleetCatFilter === 'ALL' ? FLEET_CATS : FLEET_CATS.filter(c => c.key === fleetCatFilter);
             const refOrderIdx = refineryData.map(k => k.id);
+            const nTuban = companyFleet.filter(t => fleetLocOf(t) === 'TUBAN').length, nCabang = companyFleet.length - nTuban;
+            if (fleetLocTab === null) fleetLocTab = nTuban ? 'TUBAN' : 'CABANG';
 
-            // Chip pangkalan: cuma menampilkan depo yang benar-benar punya unit di kategori yang sedang dipilih.
-            // Klik nama kilang (mis. "Kilang Tuban") supaya cuma armada berpangkalan di sana yang muncul.
-            const scope = catsToShow.flatMap(cat => companyFleet.filter(cat.match));
-            const depotSeen = new Map();
-            scope.forEach(trk => {
-                const depot = refineryData.find(k => k.id === trk.depotId && k.is_unlocked);
-                const key = depot ? depot.id : 'IDLE';
-                if (!depotSeen.has(key)) depotSeen.set(key, depot);
-            });
-            const depotKeysAll = [...depotSeen.keys()].sort((a, b) => (a === 'IDLE' ? 1 : b === 'IDLE' ? -1 : refOrderIdx.indexOf(a) - refOrderIdx.indexOf(b)));
-            document.getElementById('fleet-depot-tabs').innerHTML = [{ key: 'ALL', label: 'Semua Pangkalan' }, ...depotKeysAll.map(k => ({ key: k, label: k === 'IDLE' ? 'Idle' : depotSeen.get(k).nama }))].map(c =>
-                `<button onclick="setFleetDepot('${c.key}')" class="shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold border transition ${fleetDepotFilter === c.key ? 'bg-teal-600 border-teal-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200'}">${esc(c.label)}</button>`
+            // Tab lokasi
+            locTabs.innerHTML = [{ key: 'TUBAN', label: 'Kilang Tuban', icon: 'fa-industry', n: nTuban }, { key: 'CABANG', label: 'Kilang / Depo Cabang', icon: 'fa-warehouse', n: nCabang }].map(c =>
+                `<button onclick="setFleetLoc('${c.key}')" class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg text-[11px] font-bold border transition ${fleetLocTab === c.key ? 'bg-cyan-600 border-cyan-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200'}"><i class="fa-solid ${c.icon}"></i><span>${c.label}</span><span class="font-mono text-[10px] opacity-80">(${c.n})</span></button>`
             ).join('');
 
-            const html = catsToShow.map(cat => {
-                const list = companyFleet.filter(cat.match);
-                if (!list.length) return '';
-                const byDepot = new Map(); // id kilang (atau 'IDLE') -> { depot, trucks: [] }
-                list.forEach(trk => {
-                    const depot = refineryData.find(k => k.id === trk.depotId && k.is_unlocked);
-                    const key = depot ? depot.id : 'IDLE';
-                    if (!byDepot.has(key)) byDepot.set(key, { depot, trucks: [] });
-                    byDepot.get(key).trucks.push(trk);
-                });
-                const depotKeys = [...byDepot.keys()].filter(dk => fleetDepotFilter === 'ALL' || dk === fleetDepotFilter)
-                    .sort((a, b) => (a === 'IDLE' ? 1 : b === 'IDLE' ? -1 : refOrderIdx.indexOf(a) - refOrderIdx.indexOf(b)));
-                if (!depotKeys.length) return '';
-                return `<div class="space-y-2.5">
-                  <div onclick="setFleetCat('${cat.key}')" class="flex items-center gap-1.5 text-xs font-black uppercase tracking-wide text-gray-200 border-b border-gray-700 pb-1.5 cursor-pointer select-none" title="Klik untuk hanya tampilkan kategori ini">
-                    <i class="fa-solid ${cat.icon} text-cyan-400"></i><span>${cat.label}</span><span class="ml-auto font-mono text-[10px] bg-gray-900 border border-gray-800 rounded-full px-2 py-0.5 normal-case text-gray-400">${list.length} unit</span>
-                  </div>
-                  ${depotKeys.map(dk => {
-                      const grp = byDepot.get(dk), d = grp.depot;
-                      return `<div class="pl-1 space-y-2">
-                        <div onclick="setFleetDepot('${dk}')" class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide ${d ? 'text-teal-400' : 'text-amber-400'} cursor-pointer select-none" title="Klik untuk hanya tampilkan pangkalan ini">
-                          <i class="fa-solid ${d ? (d.id === 'KILANG-01' ? 'fa-industry' : 'fa-warehouse') : 'fa-triangle-exclamation'}"></i>
-                          <span>${d ? esc(d.nama) : 'Idle &middot; Belum Ada Pangkalan Valid'}</span>
-                          <span class="ml-auto font-mono text-[9px] text-gray-500 normal-case">${grp.trucks.length} unit</span>
-                        </div>
-                        <div class="space-y-2.5">${grp.trucks.map(fleetCardHtml).join('')}</div>
-                      </div>`;
-                  }).join('')}
+            const inLoc = companyFleet.filter(t => fleetLocOf(t) === fleetLocTab);
+
+            // Chip cabang: hanya di tab Depo Cabang
+            let depotKeys = [];
+            const depotNama = new Map();
+            if (fleetLocTab === 'CABANG') {
+                inLoc.forEach(t => { const d = fleetDepotOf(t), k = d ? d.id : 'IDLE'; if (!depotNama.has(k)) depotNama.set(k, d ? d.nama : 'Idle (belum ada pangkalan valid)'); });
+                depotKeys = [...depotNama.keys()].sort((a, b) => (a === 'IDLE' ? 1 : b === 'IDLE' ? -1 : refOrderIdx.indexOf(a) - refOrderIdx.indexOf(b)));
+                if (fleetDepotFilter !== 'ALL' && !depotNama.has(fleetDepotFilter)) fleetDepotFilter = 'ALL';
+                depotTabs.innerHTML = [{ key: 'ALL', label: 'Semua Cabang' }, ...depotKeys.map(k => ({ key: k, label: depotNama.get(k) }))].map(c =>
+                    `<button onclick="setFleetDepot('${c.key}')" class="shrink-0 px-2.5 py-1 rounded-full text-[10px] font-bold border transition ${fleetDepotFilter === c.key ? 'bg-teal-600 border-teal-500 text-white' : 'bg-gray-900 border-gray-800 text-gray-400 hover:text-gray-200'}">${esc(c.label)}</button>`
+                ).join('');
+            } else depotTabs.innerHTML = '';
+
+            // Satu blok kelompok jenis unit (Truk BBM / LPG / BBL / Kapal) berisi kartu
+            const groupsHtml = list => FLEET_GROUPS.map(g => {
+                const u = list.filter(g.match); if (!u.length) return '';
+                return `<div class="space-y-2">
+                    <div class="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-gray-200 border-b border-gray-700 pb-1">
+                        <i class="fa-solid ${g.icon} text-cyan-400"></i><span>${g.label}</span><span class="ml-auto font-mono text-[10px] bg-gray-900 border border-gray-800 rounded-full px-2 py-0.5 normal-case text-gray-400">${u.length} unit</span>
+                    </div>
+                    <div class="space-y-2.5">${u.map(fleetCardHtml).join('')}</div>
                 </div>`;
             }).join('');
-            container.innerHTML = html || '<div class="text-xs text-gray-500 text-center py-4">Tidak ada armada yang cocok dengan filter ini.</div>';
+
+            let html;
+            if (fleetLocTab === 'TUBAN') html = groupsHtml(inLoc);
+            else html = depotKeys.filter(k => fleetDepotFilter === 'ALL' || k === fleetDepotFilter).map(k => {
+                const list = inLoc.filter(t => { const d = fleetDepotOf(t); return (d ? d.id : 'IDLE') === k; });
+                return `<div class="space-y-3">
+                    <div class="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${k === 'IDLE' ? 'text-amber-400' : 'text-teal-400'}">
+                        <i class="fa-solid ${k === 'IDLE' ? 'fa-triangle-exclamation' : 'fa-warehouse'}"></i><span>${esc(depotNama.get(k))}</span><span class="ml-auto font-mono text-[10px] text-gray-500 normal-case">${list.length} unit</span>
+                    </div>
+                    ${groupsHtml(list)}
+                </div>`;
+            }).join('');
+            container.innerHTML = html || `<div class="text-xs text-gray-500 text-center py-4">${fleetLocTab === 'TUBAN' ? 'Belum ada armada berpangkalan di Kilang Tuban.' : 'Belum ada armada di kilang / depo cabang.'}</div>`;
+            if (suratModalId) renderSuratModal();   // modal surat yang sedang terbuka ikut segar
         }
 
         // ===== SISTEM REPUTASI KRU =====
@@ -543,6 +605,7 @@
         }
 
         function hireCandidate(cid) {
+            if (pphBlokir()) return;
             const pool = candidatePool[recruitRole];
             const idx = pool.findIndex(c => c.cid === cid);
             if (idx === -1) return;
@@ -630,18 +693,173 @@
             if (sisa <= 0) return `Pesanan ${spbu.nama} sudah terpenuhi seluruhnya oleh armada yang sedang dalam perjalanan. Tidak perlu kirim lagi.`;
             if (truck.cap > sisa) return `Pesanan ${spbu.nama} hanya ${sisa} ${unit}, sedangkan ${truck.id} [${truck.name}] berkapasitas ${truck.cap} ${unit}. Muatan truk tidak boleh melebihi pesanan - pakai armada berkapasitas ${sisa} ${unit} atau lebih kecil.`;
             if (truck.cap === sisa) return null; // pas persis
-            const caps = capsOf(type);
+            const caps = capsOf(type, truckDepoId(truck)); // hanya armada dari depo yang sama yang bisa menyicil pesanan ini
             if (ordCanFill(sisa, caps)) {
                 const r = Math.round((sisa - truck.cap) * 10) / 10;
                 if (!ordCanFill(r, caps)) return `Kalau ${truck.id} [${truck.cap} ${unit}] dikirim sekarang, sisa pesanan ${spbu.nama} tinggal ${r} ${unit} dan tidak akan muat di armada mana pun milik Anda (tidak boleh melebihi pesanan). Pakai armada dengan kapasitas yang pas dengan sisa ${sisa} ${unit}.`;
             }
-            const better = companyFleet.find(t => t.type === type && t.kelas !== 'kapal' && t.id !== truck.id && t.cap === sisa && !busyIds.has(t.id));
+            const better = companyFleet.find(t => t.type === type && isSpbuTruck(t) && truckDepoId(t) === truckDepoId(truck) && t.id !== truck.id && t.cap === sisa && !busyIds.has(t.id));
             if (!better) return null; // tidak ada truk yang pas & available - truk kecil boleh nyicil
             return `Sisa pesanan ${spbu.nama} tinggal ${sisa} ${unit}, dan armada ${better.id} [${better.name}] berkapasitas ${better.cap} ${unit} sedang tidak bertugas - pas buat melunasi sekali jalan. Gunakan ${better.id} dulu sebelum memakai ${truck.id} [${truck.cap} ${unit}] buat kirim bertahap.`;
         }
 
+        // ===== DISPATCH OTOMATIS (BBM & LPG) =====
+        // Pemain tidak lagi memilih wilayah/SPBU/armada/supir/kernet/jenis muatan secara manual. Sistem memilih sendiri:
+        //  - PESANAN : pesanan terbuka (BBM atau LPG, sesuai tab) yang paling mendesak (stok SPBU paling tipis) dan benar-benar bisa
+        //              dikirim sekarang. Kalau pemain menekan "Kirim" dari tab Pesanan SPBU, pesanan itu yang dicoba duluan (dispatchFocus).
+        //  - WILAYAH : otomatis = Kilang/Depo wilayah SPBU tujuan (wilayahBbmNama / wilayahLpgNama).
+        //  - JENIS   : BBM ikut yang dipesan SPBU; LPG memakai LPG Tabung (sesuai stok depo yang dipakai pickOrigin).
+        //  - ARMADA  : truk (BBM/LPG) idle, dokumen sah, lolos aturan kunci pesanan & ukuran (truckSizeBlock), stok depo cukup.
+        //              Prioritas kapasitas PAS dengan sisa pesanan, lalu kapasitas terbesar, lalu asal depo terdekat.
+        //  - SUPIR / KERNET : yang sedang bebas dengan reputasi tertinggi (pelanggaran paling sedikit sebagai pemecah seri).
+        // Hasilnya ditulis ke select tersembunyi #delivery-* / #lpg-* supaya dispatchToSpbu()/dispatchLPGToSpbu() & updateRouteEstimate()
+        // tetap memakai jalur yang sama.
+        const dispatchFocus = { BBM: null, LPG: null };
+        const dispatchAutoLastKey = { BBM: '', LPG: '' };
+        const DISPATCH_AUTO = {
+            BBM: { pre: 'delivery', unit: 'KL', fuelOf: o => o.fuel !== 'lpg', ids: ['delivery-region-filter', 'delivery-spbu-select', 'delivery-truck-select', 'delivery-driver-select', 'delivery-kernet-select', 'delivery-fuel-type'] },
+            LPG: { pre: 'lpg', unit: 'Ton', fuelOf: o => o.fuel === 'lpg', ids: ['lpg-spbu-select', 'lpg-truck-select', 'lpg-driver-select', 'lpg-kernet-select', 'lpg-type-select'] }
+        };
+        function planDispatchAuto(kind) {
+            const cfg = DISPATCH_AUTO[kind], unit = cfg.unit;
+            const openOrders = orders.filter(o => cfg.fuelOf(o) && isOrderDispatchable(o)
+                && (() => { const sp = loadedSpbuList.find(x => x.kode === o.kode); return sp && isOp(sp) && (kind !== 'LPG' || sp.has_lpg); })());
+            if (dispatchFocus[kind] && !openOrders.some(o => o.id === dispatchFocus[kind])) dispatchFocus[kind] = null;
+            if (!openOrders.length) return { ok: false, reason: `Belum ada pesanan ${kind} terbuka dari SPBU.`, tip: 'Sistem akan otomatis menyusun pengiriman begitu ada SPBU yang memesan.' };
+
+            const stokLive = o => { const sp = loadedSpbuList.find(x => x.kode === o.kode); return sp && sp.stok ? sp.stok[o.fuel] : 0; };
+            const queue = openOrders.slice().sort((a, b) => stokLive(a) - stokLive(b));
+            if (dispatchFocus[kind]) { const i = queue.findIndex(o => o.id === dispatchFocus[kind]); if (i > 0) queue.unshift(queue.splice(i, 1)[0]); }
+
+            const rep = c => (c.reputation || 0) * 1000 - (c.violations || 0);
+            const bestCrew = role => companyCrew.filter(c => c.role === role && !busyIds.has(c.id)).sort((a, b) => rep(b) - rep(a))[0] || null;
+            const driver = bestCrew('Supir'), kernet = bestCrew('Kernet');
+            if (!driver || !kernet) {
+                const kurang = [!driver ? 'Supir' : '', !kernet ? 'Kernet' : ''].filter(Boolean).join(' & ');
+                return { ok: false, reason: `Tidak ada ${kurang} yang sedang bebas.`, tip: 'Tunggu kru yang bertugas kembali, atau rekrut di tab SDM.', pending: queue.length };
+            }
+
+            const idleTrucks = companyFleet.filter(t => t.type === kind && isSpbuTruck(t) && !busyIds.has(t.id) && !docExpired(t));
+            for (const o of queue) {
+                const spbu = loadedSpbuList.find(x => x.kode === o.kode);
+                const kapKey = kind === 'LPG' ? 'lpg_tabung' : FUEL_KAP_KEY[o.fuel];
+                const sisa = Math.round((o.kl - o.terkirim - (o.inTransit || 0)) * 10) / 10;
+                const cands = idleTrucks.map(t => ({ t, origin: (truckWilayahBlock(t, spbu, kind) || orderLockBlock(spbu, o.fuel, t) || truckSizeBlock(spbu, o.fuel, t, kind)) ? null : pickOrigin(kind, spbu, t.cap, t, kapKey) }))
+                    .filter(c => c.origin);
+                if (!cands.length) continue;
+                cands.sort((a, b) => ((b.t.cap === sisa) - (a.t.cap === sisa)) || (b.t.cap - a.t.cap) || (distKm(a.origin, spbu) - distKm(b.origin, spbu)));
+                const { t: truck, origin } = cands[0];
+                return { ok: true, kind, order: o, spbu, truck, driver, kernet, origin, fuelId: o.fuel, fuelLabel: kind === 'LPG' ? 'LPG Tabung' : fuelLabel(o.fuel), sisa, unit, pending: queue.length,
+                    focusMiss: dispatchFocus[kind] && dispatchFocus[kind] !== o.id ? orders.find(x => x.id === dispatchFocus[kind]) : null };
+            }
+            // Ada pesanan tapi belum satupun yang bisa dikirim: jelaskan alasan pesanan paling mendesak.
+            const u = orderUnitStatus(queue[0]);
+            return { ok: false, reason: `Pesanan ${queue[0].nama} belum bisa dikirim: ${u.txt}.`, tip: u.tip || '', pending: queue.length };
+        }
+
+        function deliverySelectForce(id, value, text) {
+            const el = document.getElementById(id); if (!el) return;
+            if (value != null && value !== '' && !el.querySelector(`option[value="${String(value).replace(/"/g, '\\"')}"]`)) el.appendChild(new Option(text || value, value));
+            el.value = value == null ? '' : value;
+        }
+        function renderDispatchAutoPlan(kind, plan) {
+            const cfg = DISPATCH_AUTO[kind];
+            const box = document.getElementById(cfg.pre + '-auto-plan'); if (!box) return;
+            const btn = document.getElementById(cfg.pre + '-dispatch-btn');
+            if (btn) btn.disabled = !plan.ok;
+            if (!plan.ok) {
+                box.innerHTML = `<div class="py-2.5 flex items-start gap-2 text-amber-300"><i class="fa-solid fa-hourglass-half mt-0.5"></i><div><div class="font-semibold">${esc(plan.reason)}</div>${plan.tip ? `<div class="text-[10px] text-gray-500 mt-0.5">${esc(plan.tip)}</div>` : ''}</div></div>`;
+                return;
+            }
+            const { spbu, truck, driver, kernet, origin, sisa, unit } = plan;
+            const stars = c => '\u2605'.repeat(repToStars(c.reputation));
+            const row = (ic, col, label, val, sub) => `<div class="flex items-start justify-between gap-3 py-1.5 border-b border-gray-800/70 last:border-0"><span class="text-gray-500 shrink-0 whitespace-nowrap"><i class="fa-solid ${ic} ${col} w-4 text-center mr-1"></i>${label}</span><span class="text-right min-w-0"><span class="text-gray-100 font-semibold break-words">${val}</span>${sub ? `<span class="block text-[10px] text-gray-500">${sub}</span>` : ''}</span></div>`;
+            const wNama = kind === 'LPG' ? spbu.wilayahLpgNama : spbu.wilayahBbmNama, wJarak = kind === 'LPG' ? spbu.wilayahLpgJarak : spbu.wilayahBbmJarak;
+            const jarak = wJarak != null ? ` &middot; &plusmn;${wJarak} km` : '';
+            box.innerHTML =
+                row('fa-map-location-dot', 'text-sky-400', 'Wilayah', esc(wNama || '-'), `Kilang/Depo terdekat${jarak}`) +
+                row('fa-gas-pump', 'text-emerald-400', 'Tujuan SPBU', `[${esc(spbu.kode)}] ${esc(spbu.nama)}`, `Pesanan tersisa ${sisa} ${unit}`) +
+                row(kind === 'LPG' ? 'fa-fire-flame-simple' : 'fa-droplet', 'text-amber-400', kind === 'LPG' ? 'Jenis Muatan' : 'Jenis BBM', esc(plan.fuelLabel), `Muatan ${truck.cap} ${unit} &middot; asal ${esc(origin.nama)}`) +
+                row('fa-truck', 'text-blue-400', 'Armada', `${esc(truck.id)} [${esc(truck.plat)}]`, esc(truck.name)) +
+                row('fa-id-card', 'text-blue-400', 'Supir', esc(driver.name), `${stars(driver)} Rep ${Math.round(driver.reputation)} &middot; Viol ${driver.violations}`) +
+                row('fa-user-gear', 'text-amber-400', 'Kernet', esc(kernet.name), `${stars(kernet)} Rep ${Math.round(kernet.reputation)} &middot; Viol ${kernet.violations}`) +
+                (plan.pending > 1 ? `<div class="py-1.5 text-[10px] text-gray-500"><i class="fa-solid fa-list-ol mr-1"></i>${plan.pending - 1} pesanan ${kind} lain menunggu giliran.</div>` : '') +
+                (plan.focusMiss ? `<div class="py-1.5 text-[10px] text-amber-400"><i class="fa-solid fa-circle-info mr-1"></i>Pesanan ${esc(plan.focusMiss.nama)} belum bisa dikirim sekarang, jadi sistem memilih pesanan lain yang siap.</div>` : '');
+        }
+        // Susun ulang rencana dispatch otomatis lalu sinkronkan ke select tersembunyi + estimasi rute. Aman dipanggil berulang.
+        function refreshDispatchAuto(kind) {
+            const cfg = DISPATCH_AUTO[kind], pre = cfg.pre;
+            if (!document.getElementById(pre + '-auto-plan')) return { ok: false, reason: 'Belum siap.' };
+            let plan;
+            try { plan = planDispatchAuto(kind); } catch (e) { console.error('planDispatchAuto', e); plan = { ok: false, reason: 'Gagal menyusun rencana otomatis.', tip: String(e && e.message || e) }; }
+            const snap = () => cfg.ids.map(i => (document.getElementById(i) || {}).value).join('|');
+            const before = snap();
+            if (kind === 'BBM') deliverySelectForce('delivery-region-filter', 'ALL');
+            if (plan.ok) {
+                deliverySelectForce(pre + '-spbu-select', plan.spbu.kode, `[${plan.spbu.kode}] ${plan.spbu.nama}`);
+                deliverySelectForce(pre + '-truck-select', plan.truck.id, `${plan.truck.id} [${plan.truck.plat}] - ${plan.truck.name}`);
+                deliverySelectForce(pre + '-driver-select', plan.driver.id, plan.driver.name);
+                deliverySelectForce(pre + '-kernet-select', plan.kernet.id, plan.kernet.name);
+                if (kind === 'BBM') deliverySelectForce('delivery-fuel-type', plan.fuelLabel);
+                else deliverySelectForce('lpg-type-select', 'Tabung 3kg'); // label muatan saja; stok yang dipakai tetap LPG Tabung (lpg_tabung)
+            } else {
+                ['-spbu-select', '-truck-select', '-driver-select', '-kernet-select'].forEach(x => deliverySelectForce(pre + x, ''));
+            }
+            renderDispatchAutoPlan(kind, plan);
+            const key = plan.ok ? [plan.spbu.kode, plan.truck.id, plan.fuelId].join('|') : 'none';
+            if (snap() !== before || key !== dispatchAutoLastKey[kind]) {
+                dispatchAutoLastKey[kind] = key;
+                if (!plan.ok) {
+                    routeEstimateSeq++; // buang hasil estimasi async lama supaya tidak menimpa pesan kosong ini
+                    const box = document.getElementById(pre + '-route-estimate');
+                    if (box) box.innerHTML = 'Menunggu rencana pengiriman otomatis.';
+                } else updateRouteEstimate(pre);
+            }
+            return plan;
+        }
+        // Dipanggil dari semua tempat yang me-refresh dropdown/pesanan: perbarui rencana BBM dan LPG sekaligus.
+        function refreshDeliveryAuto() { refreshDispatchAuto('LPG'); return refreshDispatchAuto('BBM'); }
+
+        // ===== DISPATCHER OTOMATIS (Pass Dasar ke atas) =====
+        // Memakai rencana yang sama dengan tombol Kirim (planDispatchAuto), tapi berangkat langsung tanpa modal Surat Jalan.
+        // Jalan berulang sampai tidak ada lagi pasangan pesanan+truk idle+kru bebas (jadi sebanyak truk yang idle).
+        // Nomor Surat Jalan tetap diterbitkan & dicatat di log. Tidak jalan saat tab tidak aktif (jam game juga dijeda).
+        let autoDispatchOn = true, autoDispatchBusy = false;
+        function autoDispatchRun(kind) {
+            let n = 0;
+            for (let guard = 0; guard < 200; guard++) {
+                let plan; try { plan = planDispatchAuto(kind); } catch (e) { console.error('autoDispatch', e); break; }
+                if (!plan.ok) break;
+                const { spbu, truck, driver, kernet, origin } = plan, lpg = kind === 'LPG';
+                const d = { spbu, truck, driver, kernet, origin, jenisMuatan: lpg ? 'Tabung 3kg' : plan.fuelLabel, kapKey: lpg ? 'lpg_tabung' : FUEL_KAP_KEY[plan.fuelId], hargaPerUnit: lpg ? ECO.jualTon : hargaJualKl(plan.fuelId), silent: true };
+                const no = generateNomorSuratJalan(kind);
+                notifyAsalBeda(truck, origin, d.jenisMuatan);
+                settleTruckDelivery(no, d); n++;
+                addLog(`DISPATCHER OTOMATIS: ${no} - ${truck.id} [${driver.name}] membawa ${plan.fuelLabel} ke ${spbu.nama}.`, 'info', 'truck');
+                if (!busyIds.has(truck.id)) break; // pengaman: kalau truk tidak jadi berangkat, jangan berputar terus
+            }
+            return n;
+        }
+        function tickAutoDispatch() {
+            renderAutoDispatchBar();
+            if (!autoDispatchOn || !passHas('dispatch') || autoDispatchBusy || document.hidden || pphUtang > 0) return; // menunggak PPh: dispatcher otomatis ikut berhenti (tanpa modal)
+            autoDispatchBusy = true;
+            try { autoDispatchRun('LPG'); autoDispatchRun('BBM'); } finally { autoDispatchBusy = false; }
+        }
+        function toggleAutoDispatch() { autoDispatchOn = !autoDispatchOn; renderAutoDispatchBar(); addLog(`DISPATCHER OTOMATIS ${autoDispatchOn ? 'DINYALAKAN' : 'DIMATIKAN'}.`, 'info'); }
+        function renderAutoDispatchBar() {
+            const bar = document.getElementById('auto-dispatch-bar'); if (!bar) return;
+            const has = passHas('dispatch');
+            bar.innerHTML = `<div class="flex items-center gap-2 min-w-0"><i class="fa-solid fa-robot ${has && autoDispatchOn ? 'text-emerald-400' : 'text-gray-500'}"></i><div class="min-w-0"><div class="text-[11px] font-bold text-gray-200">Dispatcher Otomatis</div><div class="text-[10px] text-gray-500">${has ? (autoDispatchOn ? 'Aktif: truk idle otomatis mengambil pesanan SPBU.' : 'Dimatikan: kirim manual lewat tombol Kirim.') : 'Butuh Pass Dasar atau lebih tinggi.'}</div></div></div>`
+                + (has ? `<button onclick="toggleAutoDispatch()" class="shrink-0 text-[10px] font-bold px-3 py-1.5 rounded-lg ${autoDispatchOn ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-gray-700 hover:bg-gray-600'} text-white">${autoDispatchOn ? 'ON' : 'OFF'}</button>` : '');
+        }
+
         // DISPATCH BBM - Tahap 1: validasi pilihan lalu buka Surat Jalan untuk ditandatangani
         function dispatchToSpbu() {
+            if (pphBlokir()) return;
+            // Semua pilihan ditentukan otomatis (lihat planDispatchAuto). Hitung ulang saat tombol ditekan supaya data selalu segar.
+            const plan = refreshDispatchAuto('BBM');
+            if (!plan.ok) return showModal('Belum Bisa Dispatch', plan.reason + (plan.tip ? ' ' + plan.tip : ''), 'fa-circle-info', 'amber');
             const kodeSpbu = document.getElementById('delivery-spbu-select').value;
             const truckId = document.getElementById('delivery-truck-select').value;
             const driverId = document.getElementById('delivery-driver-select').value;
@@ -666,11 +884,18 @@
             const sizeMsg = fBBM ? truckSizeBlock(spbu, fBBM.id, truck, 'BBM') : null;
             if (sizeMsg) return showModal('Pakai Armada yang Lebih Pas', sizeMsg, 'fa-truck-ramp-box', 'red');
             const kapKey = fBBM && FUEL_KAP_KEY[fBBM.id];
+            { const wb = truckWilayahBlock(truck, spbu, 'BBM'); if (wb) return showModal('Beda Wilayah Depo', wb, 'fa-map-location-dot', 'red'); }
             const origin = pickOrigin('BBM', spbu, truck.cap, truck, kapKey);
-            if (!origin) return showModal('Stok Kilang Kurang', `Tidak ada kilang/depo aktif dengan stok ${fuelType} (jadi) cukup untuk ${truck.cap} KL. Olah dulu BBL mentah jadi ${fuelType} di tab Kilang (tombol Konversi), atau transfer stok ${fuelType} ke depo.`, 'fa-gas-pump', 'red');
+            if (!origin) return showModal('Stok Kilang Kurang', `Depo pangkalan ${truck.id} (${depoNamaOf(truckDepoId(truck))}) tidak punya stok ${fuelType} (jadi) cukup untuk ${truck.cap} KL. Olah dulu BBL mentah jadi ${fuelType} di tab Kilang (tombol Konversi), atau transfer stok ${fuelType} ke depo.`, 'fa-gas-pump', 'red');
 
-            const d = { spbu, truck, driver, kernet, origin, jenisMuatan: fuelType, kapKey, hargaPerUnit: ECO.jualKl };
+            notifyAsalBeda(truck, origin, fuelType);
+            const d = { spbu, truck, driver, kernet, origin, jenisMuatan: fuelType, kapKey, hargaPerUnit: hargaJualKl(fBBM && fBBM.id) };
             openSuratJalanModal({ mode: 'BBM', tujuanNama: spbu.nama, tujuanKode: spbu.kode, jenisMuatan: fuelType, volumeText: `${truck.cap} KL`, truck, driver, kernet,
-                execute: (no) => settleTruckDelivery(no, d) });
+                execute: (no) => {
+                    settleTruckDelivery(no, d);
+                    // Setelah truk berangkat, kembali ke daftar Pesanan SPBU (pesanan yang baru dikirim pindah ke "Dalam perjalanan").
+                    dispatchFocus.BBM = null;
+                    switchTab('tab-orders');
+                } });
         }
 

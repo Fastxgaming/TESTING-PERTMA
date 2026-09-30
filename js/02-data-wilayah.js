@@ -26,23 +26,27 @@
         })();
 
         // Depo/TBBM regional (dibeli pemain, jadi titik berangkat truk terdekat)
-        refineryData.push(...[['TBBM Plumpang Jakarta',-6.1216,106.8967,25e9],['TBBM Tanjung Emas Semarang',-6.949,110.426,18e9],['TBBM Padalarang Bandung',-6.84,107.48,15e9],['TBBM Manggis Bali',-8.5,115.52,18e9],['TBBM Bitung Sulut',1.45,125.19,16e9],['TBBM Donggala Sulteng',-0.66,119.74,15e9],['Depo Mamuju Sulbar',-2.67,118.89,12e9],['TBBM Balikpapan Kaltim',-1.27,116.8,22e9],['TBBM Banjarmasin Kalsel',-3.29,114.57,15e9],['TBBM Pontianak Kalbar',-0.04,109.32,15e9],['Depo Palangka Raya Kalteng',-2.25,113.9,12e9],['Depo Tarakan Kaltara',3.31,117.62,14e9],['TBBM Makassar Sulsel',-5.14,119.43,20e9],['TBBM Ketapang Banyuwangi',-8.14,114.39,20e9]]
-            .map((d, i) => ({ id: 'KILANG-' + String(4 + i).padStart(2, '0'), nama: d[0], tipe: 'Depo Cabang BBM', lat: d[1], lon: d[2], is_unlocked: false, stok_current: 0, stok_max: 100000, unit: 'Bbl', harga_beli: d[3] * 2, mekanikId: null })));
+        refineryData.push(...[['TBBM Plumpang Jakarta',-6.1216,106.8967,25e9,'JKb'],['TBBM Tanjung Emas Semarang',-6.949,110.426,18e9,'SMb'],['TBBM Padalarang Bandung',-6.84,107.48,15e9,null],['TBBM Manggis Bali',-8.5,115.52,18e9,'MGb'],['TBBM Bitung Sulut',1.45,125.19,16e9,'BTb'],['TBBM Donggala Sulteng',-0.66,119.74,15e9,'DGb'],['Depo Mamuju Sulbar',-2.67,118.89,12e9,'MMb'],['TBBM Balikpapan Kaltim',-1.27,116.8,22e9,'BPb'],['TBBM Banjarmasin Kalsel',-3.29,114.57,15e9,'BJb'],['TBBM Pontianak Kalbar',-0.04,109.32,15e9,'PTb'],['Depo Palangka Raya Kalteng',-2.25,113.9,12e9,null],['Depo Tarakan Kaltara',3.31,117.62,14e9,'TKb'],['TBBM Makassar Sulsel',-5.14,119.43,20e9,'MKb'],['TBBM Ketapang Banyuwangi',-8.14,114.39,20e9,'KTb']]
+            .map((d, i) => ({ id: 'KILANG-' + String(4 + i).padStart(2, '0'), nama: d[0], tipe: 'Depo Cabang BBM', lat: d[1], lon: d[2], berth: d[4], is_unlocked: false, stok_current: 0, stok_max: 100000, unit: 'Bbl', harga_beli: d[3] * 2, mekanikId: null })));
 
         // TBBM Ketapang Banyuwangi (KILANG-17) melayani BBM sekaligus LPG (unit gauge tetap Bbl untuk BBL mentah).
         refineryData.forEach(k => { if (k.nama === 'TBBM Ketapang Banyuwangi') k.tipe = 'Depo Cabang BBM & LPG'; });
+
+        // Tangki BBL mentah depo cabang BBM = 50% dari Kilang Utama Tuban (5.000.000 Bbl -> 2.500.000 Bbl). Depo LPG murni (Gresik) tidak memakai tangki ini.
+        const DEPO_BBL_RATIO = 0.5, DEPO_BBL_MAX0 = Math.round(refineryData[0].stok_max * DEPO_BBL_RATIO);
+        refineryData.forEach((k, i) => { if (i > 0 && String(k.tipe).includes('BBM')) k.stok_max = DEPO_BBL_MAX0; });
 
         // ===== KAPASITAS DEPO PER JENIS PRODUK (Pusat & Cabang) =====
         // Setiap Kilang/Depo kini punya tangki terpisah per jenis BBM & LPG, masing-masing bisa di-upgrade sendiri.
         // refineRatio = jumlah Bbl bahan mentah yang dibutuhkan untuk mengolah 1 unit produk ini (BBM pakai rasio Bbl->KL yang sama dengan ECO.bblPerKl, LPG disamakan 1:1 seperti konvensi transfer kapal/darat).
         // refineRate  = sisa dari desain lama, tidak dipakai lagi untuk kecepatan; BBL->BBM sekarang diproses manual lewat tombol Konversi (lihat convertBblKeProduk & BBL_CONVERT_STEP).
         const PRODUCT_META = {
-            pertalite:      { label: 'Pertalite',      unit: 'KL',  icon: 'fa-gas-pump',       color: '#22c55e', step: 3000, baseCost: 900e6,  buyPrice: 10500000, refineRatio: ECO.bblPerKl, refineRate: 40 },
-            pertamax:       { label: 'Pertamax',       unit: 'KL',  icon: 'fa-gas-pump',       color: '#3b82f6', step: 2500, baseCost: 950e6,  buyPrice: 13500000, refineRatio: ECO.bblPerKl, refineRate: 30 },
-            pertamax_turbo: { label: 'Pertamax Turbo', unit: 'KL',  icon: 'fa-bolt',           color: '#a855f7', step: 1500, baseCost: 1100e6, buyPrice: 16000000, refineRatio: ECO.bblPerKl, refineRate: 18 },
-            solar:          { label: 'Solar',          unit: 'KL',  icon: 'fa-oil-can',        color: '#f59e0b', step: 3000, baseCost: 850e6,  buyPrice: 9800000,  refineRatio: ECO.bblPerKl, refineRate: 40 },
-            dexlite:        { label: 'Dexlite',        unit: 'KL',  icon: 'fa-oil-can',        color: '#06b6d4', step: 2000, baseCost: 1000e6, buyPrice: 13200000, refineRatio: ECO.bblPerKl, refineRate: 22 },
-            lpg_curah:      { label: 'LPG Curah',      unit: 'Ton', icon: 'fa-truck-ramp-box', color: '#f97316', step: 1500, baseCost: 1200e6, buyPrice: 9500000 },
+            pertalite:      { label: 'Pertalite',      unit: 'KL',  icon: 'fa-gas-pump',       color: '#22c55e', step: 3000, baseCost: 900e6,  refineRatio: ECO.bblPerKl, refineRate: 40 },
+            pertamax:       { label: 'Pertamax',       unit: 'KL',  icon: 'fa-gas-pump',       color: '#3b82f6', step: 2500, baseCost: 950e6,  refineRatio: ECO.bblPerKl, refineRate: 30 },
+            pertamax_turbo: { label: 'Pertamax Turbo', unit: 'KL',  icon: 'fa-bolt',           color: '#a855f7', step: 1500, baseCost: 1100e6, refineRatio: ECO.bblPerKl, refineRate: 18 },
+            solar:          { label: 'Solar',          unit: 'KL',  icon: 'fa-oil-can',        color: '#f59e0b', step: 3000, baseCost: 850e6,  refineRatio: ECO.bblPerKl, refineRate: 40 },
+            dexlite:        { label: 'Dexlite',        unit: 'KL',  icon: 'fa-oil-can',        color: '#06b6d4', step: 2000, baseCost: 1000e6, refineRatio: ECO.bblPerKl, refineRate: 22 },
+            lpg_curah:      { label: 'LPG Curah',      unit: 'Ton', icon: 'fa-truck-ramp-box', color: '#f97316', step: 1500, baseCost: 1200e6 },   // harga beli LPG Curah dinamis: lpgCurahPrice() di 04a-pasar-harga.js
             lpg_tabung:     { label: 'LPG Tabung',     unit: 'Ton', icon: 'fa-dolly',          color: '#ef4444', step: 1200, baseCost: 1050e6 }
         };
         // Ukuran sekali klik tombol "Konversi BBL -> BBM" (BBL diolah manual lewat tombol, bukan otomatis lagi).
@@ -54,6 +58,8 @@
             'Depo Cabang LPG': ['lpg_curah', 'lpg_tabung'],
             'Depo Cabang BBM & LPG': ['pertalite', 'pertamax', 'pertamax_turbo', 'solar', 'dexlite', 'lpg_curah', 'lpg_tabung']
         };
+        // Tangki LPG (curah & tabung): Tuban 200.000 Ton, depo cabang = 50% Tuban (100.000 Ton). Stok awal Tuban: LPG Curah 100.000 Ton, LPG Tabung 6.000 Ton (bukan penuh).
+        const LPG_TUBAN_MAX0 = 200000, LPG_DEPO_MAX0 = Math.round(LPG_TUBAN_MAX0 * DEPO_BBL_RATIO), LPG_TUBAN_START_STOK = 6000, LPG_CURAH_START_STOK = 100000, BBM_TUBAN_START_STOK = 5000; // BBM_TUBAN_START_STOK = stok awal tiap jenis BBM jadi di Tuban (KL); kapasitas tangki tetap 40.000
         function initKapasitasDepo() {
             refineryData.forEach(k => {
                 if (k.kap) return;
@@ -61,12 +67,12 @@
                 k.kap = {};
                 keys.forEach(key => {
                     const isLpg = key.startsWith('lpg');
-                    const startMax = k.tipe === 'Pusat Utama' ? (isLpg ? 6000 : 40000) : (isLpg ? 4000 : 15000);
+                    const startMax = k.tipe === 'Pusat Utama' ? (isLpg ? LPG_TUBAN_MAX0 : 40000) : (isLpg ? LPG_DEPO_MAX0 : 15000);
                     k.kap[key] = { max: startMax, cur: 0, level: 0 };
                 });
                 if (k.id === 'KILANG-01') {
-                    // Awal main: semua stok produk Kilang Tuban penuh (100%), bukan sebagian.
-                    Object.values(k.kap).forEach(s => { s.cur = s.max; });
+                    // Awal main: BBM jadi Tuban 5.000 KL per jenis, LPG curah 100.000 Ton, LPG tabung 6.000 Ton (bukan penuh).
+                    Object.entries(k.kap).forEach(([key, s]) => { s.cur = key === 'lpg_curah' ? Math.min(s.max, LPG_CURAH_START_STOK) : key.startsWith('lpg') ? Math.min(s.max, LPG_TUBAN_START_STOK) : Math.min(s.max, BBM_TUBAN_START_STOK); });
                 }
             });
         }
@@ -133,7 +139,10 @@
         // (bukan cuma di bawah ikon), supaya tidak menimpa/kepotong saat header pecah 2 baris.
         function positionNotifPanel() {
             const header = document.querySelector('header');
-            if (header) document.documentElement.style.setProperty('--notif-panel-top', (header.getBoundingClientRect().bottom + 6) + 'px');
+            const btn = document.querySelector('#notif-wrap > button');
+            const isMobile = window.matchMedia('(max-width: 767.98px)').matches;
+            const top = (!isMobile && btn) ? btn.getBoundingClientRect().bottom + 8 : (header ? header.getBoundingClientRect().bottom + 6 : 64);
+            document.documentElement.style.setProperty('--notif-panel-top', top + 'px');
         }
         window.addEventListener('resize', () => {
             const pn = document.getElementById('notif-panel');
@@ -199,9 +208,24 @@
             } catch (e) { showToast('Gagal menyalin UID, salin manual ya.', false); }
         }
 
+        // Isi pesan modal secara aman: hanya <b>...</b>, <br>, dan baris baru (\n) yang dirender sebagai format.
+        // Semua teks lain (termasuk nama/plat dari pemain) tetap dimasukkan sebagai teks biasa, jadi tidak bisa menyisipkan HTML.
+        function setModalMessage(el, message) {
+            el.textContent = '';
+            let bold = null;
+            String(message).split(/(<\/?b>|<br\s*\/?>|\n)/i).forEach(part => {
+                if (!part) return;
+                const tag = part.toLowerCase();
+                if (tag === '<b>') { bold = document.createElement('b'); el.appendChild(bold); }
+                else if (tag === '</b>') { bold = null; }
+                else if (tag === '\n' || /^<br/.test(tag)) (bold || el).appendChild(document.createElement('br'));
+                else (bold || el).appendChild(document.createTextNode(part));
+            });
+        }
+
         function showModal(title, message, iconClass = 'fa-handshake', theme = 'purple') {
             document.getElementById('modal-title').innerText = title;
-            document.getElementById('modal-message').innerText = message;
+            setModalMessage(document.getElementById('modal-message'), message);
             
             const iconEl = document.getElementById('modal-icon');
             iconEl.className = `fa-solid ${iconClass}`;

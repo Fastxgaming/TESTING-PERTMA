@@ -10,15 +10,39 @@
         // Hitungan waktu memakai gameNow() (jam game), BUKAN Date.now(), jadi produksi ikut berhenti saat game dijeda /
         // tab tersembunyi / pemain offline - tidak perlu logika jeda tambahan.
 
+        // Kapasitas tangki anjungan 10 juta (Bbl / Ton). Produksi/hari diset supaya tangki kosong -> penuh dalam ±3-4 HARI GAME (1 hari game = 4 jam nyata).
+        // Upgrade menaikkan rate & cap dengan persentase yang sama, jadi waktu penuh tetap. Aliran pipa ke Tuban dibatasi ruang tangki Tuban (stok_max).
         const HULU_SITES = {
-            alpha: { nama: 'Anjungan Madura Alpha', fuel: 'oil', unit: 'Bbl', jenis: 'minyak mentah', shipType: 'BBM', icon: 'fa-oil-well', tone: 'teal',
-                     lat: -7.39984902546815, lon: 114.02713911013367, buildCost: 48e9, buildHours: 12, rate: 5000, cap: 30000, opexWeek: 9e9, minLoad: 500 },
-            bravo: { nama: 'Anjungan Madura Bravo', fuel: 'oil', unit: 'Bbl', jenis: 'minyak mentah', shipType: 'BBM', icon: 'fa-oil-well', tone: 'amber',
-                     lat: -7.47, lon: 114.10, buildCost: 88e9, buildHours: 18, rate: 9500, cap: 60000, opexWeek: 17e9, minLoad: 500 },
-            gamma: { nama: 'Anjungan Gas Madura Gamma', fuel: 'gas', unit: 'Ton', jenis: 'gas bumi (LPG Curah)', shipType: 'LPG', icon: 'fa-fire-flame-simple', tone: 'orange',
-                     lat: -7.34, lon: 113.96, buildCost: 36e9, buildHours: 12, rate: 300, cap: 2400, opexWeek: 4.8e9, minLoad: 50 }
+            alpha: { nama: 'Anjungan Madura Alpha', berth: 'AN_alpha', fuel: 'oil', unit: 'Bbl', jenis: 'minyak mentah', shipType: 'BBM', icon: 'fa-oil-well', tone: 'teal',
+                     lat: -7.39984902546815, lon: 114.02713911013367, buildCost: 48e9, buildHours: 12, rate: 2500000, cap: 10000000, opexWeek: 9e9, minLoad: 500, hpp: 215000 },
+            bravo: { nama: 'Anjungan Madura Bravo', berth: 'AN_bravo', fuel: 'oil', unit: 'Bbl', jenis: 'minyak mentah', shipType: 'BBM', icon: 'fa-oil-well', tone: 'amber',
+                     lat: -7.47, lon: 114.10, buildCost: 88e9, buildHours: 18, rate: 3400000, cap: 10000000, opexWeek: 17e9, minLoad: 500, hpp: 190000 },
+            gamma: { nama: 'Anjungan Gas Madura Gamma', berth: 'AN_gamma', fuel: 'gas', unit: 'Ton', jenis: 'gas bumi (LPG Curah)', shipType: 'LPG', icon: 'fa-fire-flame-simple', tone: 'orange',
+                     lat: -7.34, lon: 113.96, buildCost: 36e9, buildHours: 12, rate: 2500000, cap: 10000000, opexWeek: 4.8e9, minLoad: 50, hpp: 1450000 }
         };
         const HULU_KEYS = Object.keys(HULU_SITES);
+        // HPP (harga pokok produksi) per Bbl/Ton: dibayar tiap kali hasil anjungan MASUK ke Kilang Tuban (lewat pipa atau kapal),
+        // jadi biayanya mengikuti pemakaian nyata, bukan produksi yang menganggur di tangki anjungan. Lebih murah dari beli di pasar
+        // (harga dasar Bbl Rp 430 rb, LPG curah Rp 2,9 jt/Ton; harga pasar sebenarnya dinamis, lihat 04a-pasar-harga.js). HPP anjungan TETAP, jadi anjungan kebal fluktuasi.
+        const HULU_HPP_RESERVE = 2e9;   // sisa kas minimum: HPP tidak boleh menghabiskan kas (gaji/opex/bunker tetap harus terbayar); dinaikkan ke Rp 2 M karena tangki LPG Tuban kini besar dan pipa gas bisa menyedot kas untuk mengisinya
+        // Target stok Kilang Tuban untuk aliran PIPA (persen dari kapasitas tangki). Pipa hanya mengisi ulang sampai target ini,
+        // bukan sampai penuh, supaya begitu pipa jadi kas tidak tersedot habis jadi stok mentah (HPP dibayar per unit yang masuk).
+        // Naikkan angkanya kalau ingin pipa menyimpan stok lebih banyak; kapal tetap bisa mengisi sampai tangki penuh.
+        const HULU_PIPE_TARGET = { oil: 0.30, gas: 0.50 };
+        const huluHppAfford = k => Math.max(0, companyCash - HULU_HPP_RESERVE) / HULU_SITES[k].hpp;
+        const huluHppAcc = {}; let huluHppFlushAt = 0;
+        function huluHppFlush(force) {
+            if (!force && Date.now() - huluHppFlushAt < 60000) return;
+            huluHppFlushAt = Date.now();
+            HULU_KEYS.forEach(k => { const a = huluHppAcc[k]; if (a && a.cost > 0) { addFinanceLog(`HPP ${HULU_SITES[k].jenis} ${HULU_SITES[k].nama} via pipa (${fmtN(a.qty)} ${HULU_SITES[k].unit})`, -Math.round(a.cost)); delete huluHppAcc[k]; } });
+        }
+        function huluHppPipe(k, q) {
+            const cost = q * HULU_SITES[k].hpp;
+            companyCash -= cost; totalExpense += cost;
+            const a = huluHppAcc[k] || (huluHppAcc[k] = { qty: 0, cost: 0 }); a.qty += q; a.cost += cost;
+            huluHppFlush(false); updateCashDisplay();
+        }
+        seaValidateBerths(Object.values(HULU_SITES));
         // Koordinat di atas format Google Maps / Leaflet: lat, lon. Untuk OSRM urutannya dibalik: lon,lat
         // (Alpha = 114.02713911013367,-7.39984902546815). Bravo & Gamma ditaruh beberapa km di sekitar Alpha.
         // Titik-titik perantara di Laut Madura: kapal & pipa TIDAK boleh memotong daratan Jawa/Madura, jadi jalurnya
@@ -177,6 +201,7 @@
 
         // ---------- Bangun & upgrade ----------
         async function huluBuild(k) {
+            if (pphBlokir()) return;
             const c = HULU_SITES[k];
             if (!currentAccount || !c || hs(k).built) return;
             if (companyCash < c.buildCost) return showModal('Kas Tidak Cukup', `Butuh ${formatRupiah(c.buildCost)} untuk membangun ${c.nama}.`, 'fa-triangle-exclamation', 'red');
@@ -191,6 +216,7 @@
             huluSyncMarkers(); huluRender();
         }
         async function huluUpgrade(k) {
+            if (pphBlokir()) return;
             const c = HULU_SITES[k], s = hs(k);
             if (!currentAccount || !c || !s.ready || s.lvl >= HULU_MAX_LVL) return;
             const cost = hUpCost(k);
@@ -215,10 +241,10 @@
             const tuban = refineryData[0];
             if (HULU_SITES[k].fuel === 'gas') {
                 const slot = tuban.kap && tuban.kap.lpg_curah;
-                return { tuban, room: slot ? Math.max(0, slot.max - slot.cur) : 0, label: 'LPG Curah',
+                return { tuban, room: slot ? Math.max(0, slot.max - slot.cur) : 0, pipeRoom: slot ? Math.max(0, Math.min(slot.max - slot.cur, slot.max * HULU_PIPE_TARGET.gas - slot.cur)) : 0, label: 'LPG Curah',
                          credit: q => { slot.cur = Math.round((slot.cur + q) * 100) / 100; return { cur: slot.cur, max: slot.max }; } };
             }
-            return { tuban, room: Math.max(0, tuban.stok_max - tuban.stok_current), label: 'stok mentah',
+            return { tuban, room: Math.max(0, tuban.stok_max - tuban.stok_current), pipeRoom: Math.max(0, Math.min(tuban.stok_max - tuban.stok_current, tuban.stok_max * HULU_PIPE_TARGET.oil - tuban.stok_current)), label: 'stok mentah',
                      credit: q => { tuban.stok_current = Math.round((tuban.stok_current + q) * 100) / 100; return { cur: tuban.stok_current, max: tuban.stok_max }; } };
         }
         const huluShipCap = (k, kapal) => kapal.cap;   // kapal BBM sudah dalam Bbl, kapal LPG dalam Ton
@@ -227,7 +253,7 @@
             if (!sSel || !nSel || !aSel) return;
             const prev = [sSel.value, nSel.value, aSel.value], unitKap = HULU_SITES[k].fuel === 'gas' ? 'Ton' : 'Bbl';
             sSel.innerHTML = ''; nSel.innerHTML = ''; aSel.innerHTML = '';
-            huluShips(k).forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = `${t.id} [${t.plat}] - ${t.cap.toLocaleString('id-ID')} ${unitKap}`; sSel.appendChild(o); });
+            huluShips(k).forEach(t => { const o = document.createElement('option'); o.value = t.id; o.textContent = `${t.id} [${t.plat}]${unitJulukan(t)} - ${t.cap.toLocaleString('id-ID')} ${unitKap}`; sSel.appendChild(o); });
             companyCrew.forEach(c => {
                 if (busyIds.has(c.id)) return;
                 const o = document.createElement('option'); o.value = c.id;
@@ -242,10 +268,13 @@
             const k = huluSel, c = HULU_SITES[k], s = hs(k), dest = huluDest(k), km = seaKm(c, dest.tuban);
             const kapal = companyFleet.find(t => t.id === (document.getElementById('hulu-ship') || {}).value);
             const capU = kapal ? huluShipCap(k, kapal) : 0, load = kapal ? Math.floor(Math.min(capU, s.stok, dest.room)) : 0;
-            el.innerHTML = `Jarak ke ${esc(dest.tuban.nama)}: <b>±${Math.round(km)} km laut</b> &middot; estimasi <b>${fmtJam(km / AVG_SHIP_SPEED_KMH)}</b> sekali jalan.` +
+            const plan = kapal ? shipPlan(kapal, c, dest.tuban) : null;
+            el.innerHTML = `Jarak ke ${esc(dest.tuban.nama)}: <b>±${Math.round(km)} km laut</b> &middot; estimasi <b>${fmtJam(km / (kapal ? shipSpeedKmh(kapal) : AVG_SHIP_SPEED_KMH))}</b> sekali jalan.` +
+                (plan && !plan.err ? `<br>Bahan bakar pergi-pulang: <b class="text-amber-300">${fmtN(plan.needL)} L</b> &middot; ${shipPlanText(plan)} (tangki kini ${fmtN(kapal.fuelL)} L, mesin ${shipCond(kapal)}%).` : (plan ? `<br><span class="text-red-300">${esc(plan.err)}</span>` : '')) +
                 (kapal ? `<br>Muatan kali ini: <b class="text-amber-300">${fmtN(load)} ${c.unit}</b> (kapal muat ${fmtN(capU)}, tangki anjungan ${fmtN(s.stok)}, sisa ruang ${dest.label} Tuban ${fmtN(dest.room)}).` : '');
         }
         async function huluKirim() {
+            if (pphBlokir()) return;
             const k = huluSel, c = HULU_SITES[k], s = hs(k);
             if (!currentAccount || !s.ready) return;
             if (hulu.storm.kind) return showModal('Pelayaran Ditunda', `${HULU_STORM[hulu.storm.kind].label} di Laut Madura. Kapal dilarang berangkat selama ±${fmtJam(huluStormLeftMs() / 3600000)} waktu game lagi. Pipa bawah laut tidak terpengaruh cuaca.`, 'fa-cloud-bolt', 'amber');
@@ -257,15 +286,21 @@
             if (docBlock(kapal)) return;
             const calc = () => { const d = huluDest(k); return Math.floor(Math.min(huluShipCap(k, kapal), s.stok, d.room)); };
             const d0 = huluDest(k);
+            { const p0 = shipPlan(kapal, c, d0.tuban);
+              if (p0.err) return showModal('Pelayaran Ditolak', p0.err, 'fa-gas-pump', 'red');
+              if (companyCash < p0.cost) return showModal('Kas Tidak Cukup', `${kapal.id} butuh ${shipPlanText(p0)} sebelum berlayar, kas Anda ${formatRupiah(companyCash)}.`, 'fa-sack-dollar', 'red'); }
             if (d0.room < c.minLoad) return showModal('Tangki Tuban Penuh', `Tangki ${d0.label} Kilang Tuban hampir penuh, tidak ada ruang untuk muatan baru.`, 'fa-circle-info', 'blue');
             let amount = calc();
             if (amount < c.minLoad) return showModal('Muatan Kurang', `Stok anjungan baru ${fmtN(s.stok)} ${c.unit}. Minimal ${fmtN(c.minLoad)} ${c.unit} agar kapal berangkat.`, 'fa-circle-info', 'amber');
-            const ok = await showConfirm(`Kirim ${fmtN(amount)} ${c.unit} ${c.jenis} dari ${c.nama} ke ${d0.tuban.nama} memakai ${kapal.id} (Nahkoda ${nahkoda.name})?`,
+            if (companyCash - HULU_HPP_RESERVE < Math.round(amount * c.hpp)) return showModal('Kas Tidak Cukup', `HPP ${fmtN(amount)} ${c.unit} ${c.jenis} adalah ${formatRupiah(Math.round(amount * c.hpp))} (dibayar saat muatan tiba di Tuban). Kas Anda ${formatRupiah(companyCash)}.`, 'fa-sack-dollar', 'red');
+            const ok = await showConfirm(`Kirim ${fmtN(amount)} ${c.unit} ${c.jenis} dari ${c.nama} ke ${d0.tuban.nama} memakai ${kapal.id} (Nahkoda ${nahkoda.name})? HPP ${formatRupiah(Math.round(amount * c.hpp))} dibayar saat muatan tiba.`,
                 { title: 'Kirim Muatan', iconClass: 'fa-ship', theme: 'blue', okLabel: 'Berangkat' });
             if (!ok) return;
             if (busyIds.has(kapal.id) || busyIds.has(nahkoda.id) || busyIds.has(abk.id)) return showModal('Masih Bertugas', 'Kapal atau kru sudah dipakai tugas lain.', 'fa-ship', 'red');
             amount = calc();
             if (amount < c.minLoad) return showModal('Muatan Kurang', 'Stok anjungan atau ruang tangki Tuban berubah, muatan kini terlalu sedikit.', 'fa-circle-info', 'amber');
+            { const p1 = shipPlan(kapal, c, d0.tuban);
+              if (p1.err || !shipBunker(kapal, p1)) return showModal('Kas Tidak Cukup', p1.err || `${kapal.id} butuh ${shipPlanText(p1)} sebelum berlayar.`, 'fa-sack-dollar', 'red'); }
             s.stok -= amount; s.transit += amount;
             animateHuluTransfer({ site: k, truck: kapal, driver: nahkoda, kernet: abk, amount, epoch: huluEpoch });
             addLog(`HULU: ${kapal.id} [Nahkoda: ${nahkoda.name}] berlayar dari ${c.nama} membawa ${fmtN(amount)} ${c.unit} ${c.jenis} ke ${d0.tuban.nama}.`, 'purple');
@@ -274,7 +309,7 @@
         }
         async function animateHuluTransfer(d) {
             const { truck, driver, kernet, site } = d, c = HULU_SITES[site], tuban = refineryData[0];
-            const origin = { nama: c.nama, lat: c.lat, lon: c.lon };
+            const origin = { nama: c.nama, lat: c.lat, lon: c.lon, berth: c.berth };
             const ids = [truck.id, driver.id, kernet.id];
             ids.forEach(i => busyIds.add(i));
             populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard();
@@ -284,23 +319,30 @@
             const fit = ownAnims === 1;
             const release = () => { ids.forEach(x => busyIds.delete(x)); populateTruckDropdowns(); populateCrewDropdowns(); renderDriversDashboard(); renderFleetDashboard(); huluPopulateShip(); };
             // Kapal berlayar di lajur pelayaran sendiri (07a-rute-laut.js) - TIDAK mengikuti garis pipa (huluPath dipakai khusus pipa).
-            const sail = (rev, fitFirst) => rev ? shipVoyage(tuban, c, meta, fitFirst) : shipVoyage(c, tuban, meta, fitFirst);
+            // Pangkalan kapal untuk misi ini = dermaga anjungan (muat & pulang di sana); tujuan bongkar = dermaga Kilang Tuban.
+            let arrived = false;
             try {
-                const leg = await sail(false, fit);
-                addLog(`SANDAR: Kapal ${truck.id} tiba di ${tuban.nama} (±${Math.round(leg.km)} km laut), kru bongkar ${c.jenis} (±${UNLOAD_SECONDS_KAPAL} detik)...`, 'info', 'truck');
-                notify(`${truck.id} sandar di ${tuban.nama}, bongkar ${c.jenis}...`, 'info');
+                await shipDepart(truck, origin);                       // [antre] -> muat di anjungan -> lepas sandar
+                const leg = await shipSail(truck, origin, tuban, meta, fit);
+                arrived = true;
                 ownAnims = Math.max(0, ownAnims - 1);
-                await pausableDelay(UNLOAD_SECONDS_KAPAL * 1000);
-                completeHuluTransfer(d);
+                await shipCallAt(truck, tuban, UNLOAD_SECONDS_KAPAL, () => completeHuluTransfer(d), {
+                    onBerthed: () => {
+                        addLog(`SANDAR: Kapal ${truck.id} tiba di ${tuban.nama} (±${Math.round(leg.km)} km laut), kru bongkar ${c.jenis} (±${UNLOAD_SECONDS_KAPAL} detik)...`, 'info', 'truck');
+                        notify(`${truck.id} sandar di ${tuban.nama}, bongkar ${c.jenis}...`, 'info');
+                    }
+                });
                 try {
-                    await sail(true, false);
-                    addLog(`Kapal ${truck.id} [Nahkoda: ${driver.name}] kembali berlabuh di ${c.nama}.`, 'info', 'truck');
-                } catch (e) { /* animasi pulang gagal, tidak mempengaruhi stok yang sudah masuk */ }
+                    await shipSail(truck, tuban, origin, meta, false);
+                    await shipReturnHome(truck, origin);
+                    addLog(`Kapal ${truck.id} [Nahkoda: ${driver.name}] kembali berlabuh di ${c.nama}. BBM ${fmtN(truck.fuelL)} L, mesin ${shipCond(truck)}%.`, 'info', 'truck');
+                } catch (e) { /* animasi pulang gagal, tidak mempengaruhi stok yang sudah masuk */ shipAbort(truck); }
                 release();
             } catch (err) {
                 // Pelayaran gagal di tengah jalan: kembalikan muatan ke tangki anjungan agar tidak hilang.
+                shipAbort(truck);
                 if (d.epoch === huluEpoch && !d.done) { const s = hs(site); s.transit = Math.max(0, s.transit - d.amount); s.stok += d.amount; }
-                ownAnims = Math.max(0, ownAnims - 1);
+                if (!arrived) ownAnims = Math.max(0, ownAnims - 1);
                 release();
             }
         }
@@ -314,10 +356,12 @@
             }
             if (d.epoch !== huluEpoch) { updateCashDisplay(); return; } // progres sudah dimuat ulang: muatan lama sudah dikembalikan
             s.transit = Math.max(0, s.transit - amount);
-            const dest = huluDest(site), masuk = Math.min(amount, dest.room), sisa = amount - masuk;
+            const dest = huluDest(site), afford = Math.floor(huluHppAfford(site)), masuk = Math.min(amount, dest.room, afford), sisa = amount - masuk, kasKurang = masuk < Math.min(amount, dest.room);
+            const hppBayar = Math.round(masuk * c.hpp);
+            if (hppBayar > 0) { companyCash -= hppBayar; totalExpense += hppBayar; addFinanceLog(`HPP ${c.jenis} ${c.nama} (${fmtN(masuk)} ${c.unit} via ${truck.id})`, -hppBayar); }
             const now = masuk > 0 ? dest.credit(masuk) : { cur: 0, max: 0 };
             if (sisa > 0) s.stok += sisa; // tangki Tuban keburu penuh: sisa dibawa balik ke anjungan, tidak hilang
-            addLog(`HULU: ${fmtN(masuk)} ${c.unit} ${c.jenis} masuk ${dest.tuban.nama} (${dest.label}).${masuk > 0 ? ` Stok kini ${fmtN(now.cur)}/${fmtN(now.max)} ${c.unit}.` : ''}${sisa > 0 ? ` Tangki penuh, ${fmtN(sisa)} ${c.unit} dikembalikan ke anjungan.` : ''}`, 'success');
+            addLog(`HULU: ${fmtN(masuk)} ${c.unit} ${c.jenis} masuk ${dest.tuban.nama} (${dest.label}).${masuk > 0 ? ` Stok kini ${fmtN(now.cur)}/${fmtN(now.max)} ${c.unit}.` : ''}${masuk > 0 ? ` HPP ${formatRupiah(hppBayar)} dibayar.` : ''}${sisa > 0 ? (kasKurang ? ` Kas tidak cukup membayar HPP, ${fmtN(sisa)} ${c.unit} dikembalikan ke anjungan.` : ` Tangki penuh, ${fmtN(sisa)} ${c.unit} dikembalikan ke anjungan.`) : ''}`, kasKurang ? 'warning' : 'success');
             notify(`${fmtN(masuk)} ${c.unit} ${c.jenis} masuk ${dest.tuban.nama}.`, 'ok');
             updateCashDisplay(); renderRefineries();
         }
@@ -413,8 +457,8 @@
             }
             // aliran: tangki anjungan -> Kilang Tuban
             if (!p.leak && !p.unpaid && s.ready && s.stok > 0) {
-                const d = huluDest(k), q = Math.min(pipeCap(k) * dtDay, s.stok, d.room);
-                if (q > 0.01) { s.stok -= q; d.credit(q); p.flowed += q; huluFlowDirty = true; }
+                const d = huluDest(k), q = Math.min(pipeCap(k) * dtDay, s.stok, d.pipeRoom, huluHppAfford(k));
+                if (q > 0.01) { s.stok -= q; d.credit(q); p.flowed += q; huluFlowDirty = true; huluHppPipe(k, q); }
             }
             p.lastGt = now;
         }
@@ -425,9 +469,9 @@
             if (!p.ready) return { key: 'b', label: 'Sedang dibangun', color: '#f59e0b' };
             if (p.leak) return p.repairDoneGt ? { key: 'x', label: 'Sedang diperbaiki', color: '#f59e0b' } : { key: 'l', label: 'BOCOR - aliran berhenti', color: '#ef4444' };
             if (p.unpaid) return { key: 'u', label: 'Berhenti (kas kurang)', color: '#ef4444' };
-            const room = s.ready ? huluDest(k).room : 0;
+            const room = s.ready ? huluDest(k).pipeRoom : 0;
             if (s.stok > 0.5 && room > 0.5) return { key: 'r', label: 'Mengalir ke Kilang Tuban', color: '#14b8a6' };
-            return { key: 'r', label: room <= 0.5 ? 'Siaga (tangki Tuban penuh)' : 'Siaga (tangki anjungan kosong)', color: '#64748b' };
+            return { key: 'r', label: room <= 0.5 ? 'Siaga (stok Tuban sudah cukup)' : 'Siaga (tangki anjungan kosong)', color: '#64748b' };
         }
         // Garis pipa di peta (merah putus-putus saat bocor + ikon tetesan di tengah pipa)
         const huluPipeLines = {}, huluPipeLeakMk = {}; let huluPipeSig = {};
@@ -456,6 +500,7 @@
 
         // ---------- Bangun, inspeksi & perbaiki pipa ----------
         async function huluPipeBuild(k) {
+            if (pphBlokir()) return;
             const c = HULU_SITES[k], p = hp(k);
             if (!currentAccount || !c || !hs(k).ready || p.built) return;
             const cost = pipeCost(k), hrs = pipeHours(k);
@@ -591,7 +636,7 @@
                 body = `<div class="grid grid-cols-2 gap-2 text-[10px] mb-3">${chip('Biaya Bangun', formatRupiah(c.buildCost), 'text-amber-400')}${chip('Waktu Bangun', c.buildHours + ' jam game', 'text-sky-400')}
                         ${chip('Produksi', fmtN(c.rate) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Operasional', formatRupiah(c.opexWeek) + '/minggu', 'text-red-400')}</div>
                     <button onclick="huluBuild('${k}')" class="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-2.5 rounded-xl text-xs transition"><i class="fa-solid fa-hammer mr-1.5"></i>Bangun Anjungan</button>
-                    <div class="text-[9px] text-gray-500 mt-2"><i class="fa-solid fa-circle-info mr-1"></i>1 hari game = 48 menit nyata, 1 minggu game = ±5,6 jam nyata (operasional ditagih tiap minggu game). ${c.fuel === 'gas' ? `Gas diangkut kapal Tanker LPG dan masuk sebagai LPG Curah Tuban (harga beli ${formatRupiah(PRODUCT_META.lpg_curah.buyPrice)}/Ton).` : `Biaya pokok minyak sendiri jauh di bawah harga beli (${formatRupiah(BBL_PRICE)}/Bbl), tapi modalnya besar dan butuh kapal tanker.`}</div>`;
+                    <div class="text-[9px] text-gray-500 mt-2"><i class="fa-solid fa-circle-info mr-1"></i>1 hari game = 4 jam nyata, 1 minggu game = ±28 jam nyata (operasional ditagih tiap minggu game). ${c.fuel === 'gas' ? `Gas diangkut kapal Tanker LPG dan masuk sebagai LPG Curah Tuban (harga pasar kini ${formatRupiah(lpgCurahPrice())}/Ton, HPP anjungan ${formatRupiah(c.hpp)}/Ton = hemat ${Math.round((1 - c.hpp / lpgCurahPrice()) * 100)}%).` : `Biaya pokok minyak sendiri (HPP ${formatRupiah(c.hpp)}/Bbl) jauh di bawah harga pasar kini (${formatRupiah(bblPrice())}/Bbl, hemat ${Math.round((1 - c.hpp / bblPrice()) * 100)}%), tapi modalnya besar dan butuh kapal tanker.`}</div>`;
             } else if (!s.ready) {
                 body = `<div class="text-[11px] text-gray-300 mb-1.5">Pembangunan berlangsung...</div><div id="hulu-build-bar">${huluBar(0, 'bg-amber-500')}</div><div id="hulu-build-left" class="text-[10px] text-gray-400 mt-1.5"></div>`;
             } else {
@@ -601,7 +646,7 @@
                        <div class="text-[9px] text-gray-500 mt-1">Tiap level: produksi &amp; tangki +${Math.round(HULU_UP.rate * 100)}%, operasional +${Math.round(HULU_UP.opex * 100)}% dari nilai dasar.</div>`;
                 body = `<div class="flex justify-between text-[11px] mb-1"><span class="text-gray-400">Tangki penampung anjungan</span><b id="hulu-stok-txt" class="text-gray-200 font-mono"></b></div>
                     <div id="hulu-stok-bar">${huluBar(0, 'bg-teal-500')}</div>
-                    <div class="grid grid-cols-2 gap-2 text-[10px] mt-3">${chip('Produksi', fmtN(hRate(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Operasional', formatRupiah(hOpex(k)) + '/minggu', 'text-red-400')}
+                    <div class="grid grid-cols-2 gap-2 text-[10px] mt-3">${chip('Produksi', fmtN(hRate(k)) + ' ' + c.unit + '/hari', 'text-emerald-400')}${chip('Operasional', formatRupiah(hOpex(k)) + '/minggu', 'text-red-400')}${chip('HPP', formatRupiah(c.hpp) + '/' + c.unit, 'text-amber-400')}
                         ${chip('Total Diproduksi', '', 'text-sky-400', 'hulu-produced')}${chip('Tagihan Berikut', '', 'text-amber-400', 'hulu-due')}</div>${up}`;
             }
             let ship = '';

@@ -161,6 +161,7 @@
         // Perbarui fase perjalanan ('muat'|'berangkat'|'tiba'|'bongkar') pada pesanan SPBU terkait sebuah pengiriman,
         // kalau pesanannya masih ada & masih terbuka. Dipanggil dari animateDelivery saat truk tiba & mulai bongkar.
         function updateOrderTahap(spbu, truck, jenisMuatan, tahap) {
+            const tr = activeTrips.get(truck.id); if (tr) tr.ph = tahap; // ikut disimpan supaya perjalanan bisa dipulihkan setelah refresh
             truckFase.set(truck.id, tahap); // dipakai bar status armada & penanda unit di tab Pesanan SPBU
             const fuelId = orderFuelIdFor(truck, jenisMuatan);
             const o = fuelId ? orders.find(x => x.kode === spbu.kode && x.fuel === fuelId && x.status === 'open') : null;
@@ -206,11 +207,15 @@
             animateDelivery(d);
             renderOrders();
             addLog(`SURAT JALAN ${nomorSJ}: Armada ${truck.id} [Supir: ${driver.name}] DITANDATANGANI. Kru mulai memuat ${jenisMuatan} untuk ${spbu.nama} (±${LOAD_SECONDS} detik) sebelum berangkat.`, 'info', 'truck');
-            showModal('Proses Muat Dimulai', `Surat Jalan ${nomorSJ} telah ditandatangani. Kru memuat ${jenisMuatan} ke truk ${truck.id} (±${LOAD_SECONDS} detik), lalu truk berangkat ke ${spbu.nama}.\nPendapatan akan cair otomatis setelah truk tiba di tujuan dan kru selesai bongkar muatan (±${UNLOAD_SECONDS} detik setelah tiba).`, 'fa-truck-ramp-box', 'blue');
+            if (!d.silent) showModal('Proses Muat Dimulai', `Surat Jalan ${nomorSJ} telah ditandatangani. Kru memuat ${jenisMuatan} ke truk ${truck.id} (±${LOAD_SECONDS} detik), lalu truk berangkat ke ${spbu.nama}.\nPendapatan akan cair otomatis setelah truk tiba di tujuan dan kru selesai bongkar muatan (±${UNLOAD_SECONDS} detik setelah tiba).`, 'fa-truck-ramp-box', 'blue');
         }
 
         // DISPATCH LPG
         function dispatchLPGToSpbu() {
+            if (pphBlokir()) return;
+            // Semua pilihan ditentukan otomatis (lihat planDispatchAuto). Hitung ulang saat tombol ditekan supaya data selalu segar.
+            const plan = refreshDispatchAuto('LPG');
+            if (!plan.ok) return showModal('Belum Bisa Dispatch', plan.reason + (plan.tip ? ' ' + plan.tip : ''), 'fa-circle-info', 'amber');
             const kodeSpbu = document.getElementById('lpg-spbu-select').value;
             const truckId = document.getElementById('lpg-truck-select').value;
             const driverId = document.getElementById('lpg-driver-select').value;
@@ -234,9 +239,11 @@
             if (lockMsgLpg) return showModal('Pesanan Terkunci', lockMsgLpg, 'fa-lock', 'red');
             const sizeMsg = truckSizeBlock(spbu, 'lpg', truck, 'LPG');
             if (sizeMsg) return showModal('Pakai Armada yang Lebih Pas', sizeMsg, 'fa-truck-ramp-box', 'red');
+            { const wb = truckWilayahBlock(truck, spbu, 'LPG'); if (wb) return showModal('Beda Wilayah Depo', wb, 'fa-map-location-dot', 'red'); }
             const origin = pickOrigin('LPG', spbu, truck.cap, truck, 'lpg_tabung');
-            if (!origin) return showModal('Stok LPG Tabung Kurang', `Tidak ada kilang/depo aktif dengan stok LPG Tabung cukup untuk ${truck.cap} Ton. Konversi LPG Curah jadi LPG Tabung di tab Kilang (tombol Konversi), atau transfer stok LPG ke depo.`, 'fa-fire-flame-simple', 'red');
+            if (!origin) return showModal('Stok LPG Tabung Kurang', `Depo pangkalan ${truck.id} (${depoNamaOf(truckDepoId(truck))}) tidak punya stok LPG Tabung cukup untuk ${truck.cap} Ton. Konversi LPG Curah jadi LPG Tabung di tab Kilang (tombol Konversi), atau transfer stok LPG ke depo.`, 'fa-fire-flame-simple', 'red');
 
+            notifyAsalBeda(truck, origin, lpgType);
             const d = { spbu, truck, driver, kernet, origin, jenisMuatan: lpgType, kapKey: 'lpg_tabung', hargaPerUnit: ECO.jualTon };
             openSuratJalanModal({ mode: 'LPG', tujuanNama: spbu.nama, tujuanKode: spbu.kode, jenisMuatan: lpgType, volumeText: `${truck.cap} Ton`, truck, driver, kernet,
                 execute: (no) => {
@@ -244,6 +251,9 @@
                     const sl = origin.kap && origin.kap.lpg_tabung;
                     if (!sl || sl.cur < truck.cap) return showModal('Stok LPG Tabung Kurang', `Stok LPG Tabung ${origin.nama} tidak cukup untuk ${truck.cap} Ton.`, 'fa-triangle-exclamation', 'red');
                     settleTruckDelivery(no, d);
+                    // Setelah truk berangkat, kembali ke daftar Pesanan SPBU (pesanan yang baru dikirim pindah ke "Dalam perjalanan").
+                    dispatchFocus.LPG = null;
+                    switchTab('tab-orders');
                 } });
         }
 
@@ -287,12 +297,14 @@
         // Harga Solar non-subsidi/industri (acuan Dexlite/Dex per medio 2026) - truk perusahaan tidak pakai Biosolar subsidi.
         const HARGA_SOLAR_TRUK = 21000; // Rp/liter
         // Konsumsi BBM truk tangki: makin besar kapasitas & makin berat muatan, makin boros per km.
+        // Varian Heavy Duty (mesin 330 PS Euro 4) dibanding tipe Standar: solar 20% lebih hemat, ban aus 2x lebih lambat, laju jalan +10%.
+        const HD_EFEK = { pakaiSolar: 0.80, ausBan: 0.50, laju: 1.10 };
+        const isHeavyDuty = t => !!(t && /Heavy Duty/i.test(t.name || ''));
+        const tireWearMult = t => isHeavyDuty(t) ? HD_EFEK.ausBan : 1;
         function kmPerLiterTruk(truck) {
-            const cap = (truck && truck.cap) || 0;
-            if (cap <= 8) return 4.2;
-            if (cap <= 16) return 3.4;
-            if (cap <= 24) return 2.8;
-            return 2.3; // trailer 32 KL / LPG trailer 20 Ton ke atas
+            const cap = (truck && truck.cap) ? (isDepoTruck(truck) ? depoKlEq(truck) : truck.cap) : 0; // truk depo kapasitasnya Bbl -> setara KL untuk tabel konsumsi
+            const base = cap <= 8 ? 4.2 : cap <= 16 ? 3.4 : cap <= 24 ? 2.8 : 2.3; // trailer 32 KL / LPG trailer 20 Ton ke atas
+            return isHeavyDuty(truck) ? base / HD_EFEK.pakaiSolar : base;
         }
         // Rasio panjang jalur riil terhadap jarak garis lurus (haversine) antar 2 titik - makin besar rasionya,
         // makin berkelok-kelok jalannya (banyak tikungan/rintangan), makin kecil (mendekati 1) makin lurus & renggang.
@@ -307,7 +319,7 @@
         // Dipakai juga sebagai batas clamp fluktuasi kecepatan "hidup" real-time di popup info truk - lihat
         // liveSpeedKmh() di 07-animasi-kapal.js.
         const SPEED_RANGE = [55, 80];
-        function roadSpeedKmh(sinuosity, real) {
+        function roadSpeedKmh(sinuosity, real, hd) {
             let speed;
             if (!real) speed = 55; // rute perkiraan (OSRM gagal dimuat) sengaja dibuat berkelok, anggap jalan kecil
             else if (sinuosity >= 1.35) speed = 55;      // sangat berkelok-kelok / banyak rintangan
@@ -315,6 +327,7 @@
             else if (sinuosity >= 1.12) speed = 68;      // sedikit berkelok
             else if (sinuosity >= 1.05) speed = 74;      // relatif lurus
             else speed = 80;                              // nyaris lurus & renggang, jarang ada belokan
+            if (hd) return Math.max(SPEED_RANGE[0], Math.min(SPEED_RANGE[1] * HD_EFEK.laju, speed * HD_EFEK.laju));
             return Math.max(SPEED_RANGE[0], Math.min(SPEED_RANGE[1], speed));
         }
         // Estimasi biaya sekali jalan (one-way) untuk preview sebelum truk berangkat.
@@ -329,6 +342,18 @@
         // 07-animasi-kapal.js) supaya preview akurat & benar-benar mencerminkan rintangan/kelokan jalur asli
         // yang akan dilalui truk (fitur pilihan Rute Tol/Non-Tol sudah dihapus - hanya ada satu jalur nyata).
         let routeEstimateSeq = 0;
+        // Format durasi jam-game -> "1h 4j 20m" (hari, jam, menit) dan detik nyata -> "m:ss".
+        function fmtDurGame(h) {
+            const tot = Math.max(0, Math.round(h * 60)), d = Math.floor(tot / 1440), j = Math.floor((tot % 1440) / 60), m = tot % 60;
+            return (d ? `${d}h ` : '') + (j || d ? `${j}j ` : '') + `${m}m`;
+        }
+        function fmtRealSec(sec) { sec = Math.max(0, Math.round(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+        // Jam dinding in-game setelah `h` jam-game dari sekarang, mis. "14:35" atau "03:10 (H+1)".
+        function etaClock(h) {
+            const now = new Date(gameNow()), t = new Date(gameNow() + h * 3600000);
+            const diff = Math.round((new Date(t.getFullYear(), t.getMonth(), t.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+            return String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0') + (diff > 0 ? ` (H+${diff})` : '');
+        }
         async function updateRouteEstimate(prefix) {
             const box = document.getElementById(prefix + '-route-estimate');
             if (!box) return;
@@ -347,54 +372,151 @@
             const kapKeyPrev = fBBMPrev && FUEL_KAP_KEY[fBBMPrev.id];
             const origin = pickOrigin(truck.type, spbu, truck.cap, truck, truck.type === 'LPG' ? 'lpg_tabung' : kapKeyPrev);
             if (!origin) {
-                box.innerHTML = '<span class="text-amber-400">Tidak ditemukan kilang/depo asal yang cocok untuk kombinasi ini.</span>';
+                const wb = truckWilayahBlock(truck, spbu, truck.type);
+                box.innerHTML = `<span class="text-amber-400">${wb ? esc(wb) : 'Depo pangkalan truk tidak punya stok yang cukup untuk kombinasi ini.'}</span>`;
                 return;
             }
 
             const mySeq = ++routeEstimateSeq;
             box.innerHTML = '<span class="text-gray-500">Menghitung rute...</span>';
-            const straightKm = distKm(origin, spbu);
 
-            const { pts, real } = await fetchRoute(origin, spbu);
+            // ---- 1) Susun ruas perjalanan persis seperti journey(): darat, atau darat -> ferry -> darat bila beda pulau ----
+            const legs = [];
+            let allReal = true, depPort = null, arrPort = null;
+            try {
+                const addLand = async (a, b) => {
+                    const { pts, real } = await fetchRoute(a, b);
+                    const s = sinuosityOf(pts, distKm(a, b));
+                    legs.push({ tipe: 'darat', dari: a.nama || a.name, ke: b.nama || b.name, km: s.total, speed: roadSpeedKmh(s.sinuosity, real, isHeavyDuty(truck)), real, sin: s.sinuosity });
+                    if (!real) allReal = false;
+                };
+                const oIsl = islandOf(origin), dIsl = islandOf(spbu);
+                if (oIsl === dIsl) await addLand(origin, spbu);
+                else {
+                    depPort = getPort(oIsl, dIsl); arrPort = getPort(dIsl, oIsl);
+                    await addLand(origin, depPort);
+                    legs.push({ tipe: 'ferry', dari: depPort.name, ke: arrPort.name, km: distKm(depPort, arrPort), speed: AVG_FERRY_SPEED_KMH, real: true });
+                    await addLand(arrPort, spbu);
+                }
+            } catch (err) {
+                if (mySeq === routeEstimateSeq) box.innerHTML = '<span class="text-amber-400">Gagal menghitung rute, coba pilih ulang armada/SPBU.</span>';
+                return;
+            }
             if (mySeq !== routeEstimateSeq) return; // sudah ada permintaan estimasi lain yang lebih baru, buang hasil ini
-            const s = sinuosityOf(pts, straightKm);
-            const sinuosity = s.sinuosity;
-            const speedKmh = roadSpeedKmh(sinuosity, real);
-            const kmEfektif = s.total;
-            const est = estimasiBiayaRute(kmEfektif, speedKmh, truck);
-            const biayaBbm = est.biayaBbm, jamTempuh = est.jamTempuh;
-            const karakterJalan = !real ? 'rute perkiraan' : sinuosity >= 1.22 ? 'jalan berkelok-kelok/banyak rintangan' : sinuosity >= 1.12 ? 'sedikit berkelok' : 'jalan renggang & lurus';
 
-            // Estimasi kotor & bersih: mengikuti persis rumus yang dipakai saat pendapatan benar-benar cair
-            // di completeUnloading (07-animasi-kapal.js), TERMASUK bonus jarak (di atas jarakBonusMinKm) dan biaya
-            // solar pulang-pergi (PP) - MINUS bonus pesanan & potensi denda, karena itu baru pasti setelah truk
-            // benar-benar tiba (hasil riil bisa lebih besar, atau berkurang kalau kena denda KIR/dokumen).
-            const hargaPerUnit = truck.type === 'LPG' ? ECO.jualTon : ECO.jualKl;
+            // ---- 2) Waktu (jam-game). Detik nyata -> jam-game: detik x GAME_SPEED / 3600 ----
+            const GS = GAME_SPEED, rH = sec => sec * GS / 3600, realSecOf = h => h * 3600 / GS;
+            const landLegs = legs.filter(l => l.tipe === 'darat'), ferryLegs = legs.filter(l => l.tipe === 'ferry');
+            const kmTotal = legs.reduce((a, l) => a + l.km, 0), landKm = landLegs.reduce((a, l) => a + l.km, 0), ferryKm = ferryLegs.reduce((a, l) => a + l.km, 0);
+            const landH = landLegs.reduce((a, l) => a + l.km / l.speed, 0), ferryH = ferryLegs.reduce((a, l) => a + l.km / l.speed, 0);
+            const antreH = depPort ? rH(FERRY_QUEUE_SEC * 2) : 0;                 // antre naik + antre turun kapal
+            const pergiH = landH + ferryH + antreH, pulangH = pergiH;
+            const muatH = rH(LOAD_SECONDS), bongkarH = rH(UNLOAD_SECONDS);
+            const siklusH = muatH + pergiH + bongkarH + pulangH;
+            const speedRata = pergiH > 0 ? kmTotal / pergiH : 0;
+            const sinMax = landLegs.reduce((a, l) => Math.max(a, l.sin || 0), 0);
+            const karakterJalan = !allReal ? 'rute perkiraan (server rute tidak merespons)' : sinMax >= 1.22 ? 'berkelok-kelok / banyak rintangan' : sinMax >= 1.12 ? 'sedikit berkelok' : 'renggang & relatif lurus';
+
+            // ---- 3) Skenario kecepatan (kecepatan darat berfluktuasi di rentang SPEED_RANGE saat jalan) ----
+            const skenario = [
+                { nm: 'Optimis', ic: 'fa-gauge-high', cls: 'text-emerald-400', sp: SPEED_RANGE[1] },
+                { nm: 'Realistis', ic: 'fa-gauge', cls: 'text-gray-200', sp: null },
+                { nm: 'Pesimis', ic: 'fa-gauge-simple', cls: 'text-amber-400', sp: SPEED_RANGE[0] }
+            ].map(sc => {
+                const oneWay = (sc.sp ? landKm / sc.sp : landH) + ferryH + antreH;
+                return { ...sc, oneWay, tiba: muatH + oneWay, balik: muatH + oneWay * 2 + bongkarH, spTxt: sc.sp ? sc.sp + ' km/j' : Math.round(landKm / (landH || 1)) + ' km/j' };
+            });
+
+            // ---- 4) Keuangan: rumus sama dengan completeUnloading() ----
+            const hargaPerUnit = truck.type === 'LPG' ? ECO.jualTon : hargaJualKl(fBBMPrev && fBBMPrev.id);
             const unitLabel = truck.type === 'LPG' ? 'Ton' : 'KL';
             const revenueDasar = truck.cap * hargaPerUnit;
-            const jarakBonusKm = Math.max(0, Math.min(kmEfektif, ECO.jarakBonusCapKm) - ECO.jarakBonusMinKm);
+            const jarakBonusKm = Math.max(0, Math.min(kmTotal, ECO.jarakBonusCapKm) - ECO.jarakBonusMinKm);
             const bonusJarak = Math.round(revenueDasar * ECO.bonusJarakPerKm * jarakBonusKm);
             const revenueKotor = revenueDasar + bonusJarak;
+            const bonusPesananEst = Math.round(revenueDasar * ECO.bonusPesanan);
             const biayaKirimDasar = Math.round(truck.cap * (truck.type === 'LPG' ? ECO.biayaKirimTon : ECO.biayaKirimKl));
-            const kmPP = kmEfektif * 2;
-            const totalPP = biayaBbm * 2;
-            const biayaAsuransi = Math.round(revenueDasar * ECO.asuransiPersen); // premi asuransi pengantaran = % dari nilai muatan
-            const totalBiayaEstimasi = biayaKirimDasar + totalPP + biayaAsuransi;
-            const revenueBersihEstimasi = revenueKotor - totalBiayaEstimasi;
+            const kmPP = kmTotal * 2;
+            const literPP = kmPP / kmPerLiterTruk(truck);
+            const totalPP = Math.round(literPP * HARGA_SOLAR_TRUK);
+            const biayaAsuransi = Math.round(revenueDasar * ECO.asuransiPersen);
+            const totalBiaya = biayaKirimDasar + totalPP + biayaAsuransi;
+            const bersih = revenueKotor - totalBiaya;
+            const bersihPlus = bersih + bonusPesananEst;
+            const margin = revenueKotor > 0 ? bersih / revenueKotor * 100 : 0;
+            const perJam = siklusH > 0 ? bersih / siklusH : 0;
+            const perKm = kmPP > 0 ? bersih / kmPP : 0;
+
+            // ---- 5) Pemeriksaan kelayakan ----
+            const cek = []; // { s: 'ok'|'warn'|'bad', t }
+            const siklusMs = siklusH * 3600000;
+            const docs = [['KIR', truck.kirTs], ['STNK', truck.stnkTs], ['Plat', truck.platTs]].filter(d => d[1]);
+            const docBad = docs.filter(d => d[1] - gameNow() <= 0), docMid = docs.filter(d => d[1] - gameNow() > 0 && d[1] - gameNow() <= siklusMs), docSoon = docs.filter(d => d[1] - gameNow() > siklusMs && d[1] - gameNow() < 30 * 86400000);
+            if (docBad.length) cek.push({ s: 'bad', t: `${docBad.map(d => d[0]).join('/')} sudah kedaluwarsa - truk tidak bisa jalan.` });
+            else if (docMid.length) cek.push({ s: 'warn', t: `${docMid.map(d => d[0]).join('/')} habis masa berlaku sebelum truk kembali (berisiko denda).` });
+            else if (docSoon.length) cek.push({ s: 'warn', t: `${docSoon.map(d => d[0]).join('/')} akan habis <30 hari - segera perpanjang.` });
+            else if (docs.length) cek.push({ s: 'ok', t: 'Dokumen KIR, STNK & Plat aman sampai truk kembali.' });
+            const ban0 = truck.banPct != null ? truck.banPct : 100, wear = kmPP * TIRE_WEAR_PER_KM * tireWearMult(truck), ban1 = Math.max(0, ban0 - wear);
+            cek.push({ s: ban1 <= TIRE_REPLACE_THRESHOLD ? 'warn' : 'ok', t: `Ban ${Math.round(ban0)}% &rarr; ±${Math.round(ban1)}% setelah PP (aus ±${wear.toFixed(1)}%)${ban1 <= TIRE_REPLACE_THRESHOLD ? ' - diganti otomatis di depo' : ''}.` });
+            const ord = orders.find(o => o.kode === spbu.kode && isOrderDispatchable(o) && (prefix === 'lpg' ? o.fuel === 'lpg' : o.fuel !== 'lpg') && (!fBBMPrev || o.fuel === fBBMPrev.id))
+                || orders.find(o => o.kode === spbu.kode && isOrderDispatchable(o) && (prefix === 'lpg' ? o.fuel === 'lpg' : o.fuel !== 'lpg'));
+            if (ord) {
+                const sisa = Math.max(0, Math.round((ord.kl - ord.terkirim - (ord.inTransit || 0)) * 10) / 10);
+                const tutup = sisa > 0 ? Math.min(100, Math.round(truck.cap / sisa * 100)) : 100;
+                cek.push({ s: 'ok', t: `Pesanan #${ord.id}: sisa ${sisa} ${unitLabel}, truk ini menutup ±${tutup}%${tutup < 100 ? ' (butuh unit tambahan)' : ' (tuntas)'}.` });
+                const leftMs = ORDER_TTL - (Date.now() - ord.t), tibaRealMs = (muatH + pergiH) * 3600000 / GS;
+                if (leftMs <= tibaRealMs) cek.push({ s: 'bad', t: `Pesanan hangus dalam ${fmtDurGame(leftMs * GS / 3600000)}, truk baru tiba ${fmtDurGame(muatH + pergiH)} lagi.` });
+                else cek.push({ s: leftMs - tibaRealMs < leftMs * 0.2 ? 'warn' : 'ok', t: `Batas pesanan ${fmtDurGame(leftMs * GS / 3600000)} lagi, truk tiba dalam ${fmtDurGame(muatH + pergiH)} (sisa waktu ${fmtDurGame((leftMs - tibaRealMs) * GS / 3600000)}).` });
+            }
+            if (depPort) cek.push({ s: 'ok', t: `Antar pulau (${islandOf(origin)} &rarr; ${islandOf(spbu)}): wajib lewat ferry ${esc(depPort.name)} &rarr; ${esc(arrPort.name)}, antre ±${FERRY_QUEUE_SEC * 2} dtk nyata.` });
+            const ico = { ok: 'fa-circle-check text-emerald-400', warn: 'fa-triangle-exclamation text-amber-400', bad: 'fa-circle-xmark text-red-400' };
+
+            // ---- 6) Render ----
+            const row = (l, v, c) => `<div class="flex justify-between gap-2"><span>${l}</span><span class="${c || 'text-gray-300'} font-mono text-right">${v}</span></div>`;
+            const head = t => `<div class="mt-1.5 pt-1 border-t border-gray-800 text-[9px] font-bold uppercase tracking-wide text-gray-500">${t}</div>`;
+            const segs = [
+                { nm: 'Muat', h: muatH, c: 'bg-amber-500' }, { nm: 'Pergi', h: pergiH, c: 'bg-emerald-500' },
+                { nm: 'Bongkar', h: bongkarH, c: 'bg-violet-500' }, { nm: 'Pulang', h: pulangH, c: 'bg-sky-500' }
+            ];
+            const bar = `<div class="flex h-2 rounded overflow-hidden mt-1 mb-1">${segs.map(x => `<div class="${x.c}" style="width:${Math.max(3, x.h / siklusH * 100).toFixed(1)}%" title="${x.nm}: ${fmtDurGame(x.h)}"></div>`).join('')}</div>`;
+            const legRows = legs.map(l => `<div class="flex justify-between gap-2 pl-2"><span class="truncate"><i class="fa-solid ${l.tipe === 'ferry' ? 'fa-ship text-cyan-400' : 'fa-road text-gray-500'} mr-1"></i>${esc(l.dari)} &rarr; ${esc(l.ke)}</span><span class="text-gray-300 font-mono shrink-0">${Math.round(l.km)} km &middot; ${Math.round(l.speed)} km/j &middot; ${fmtDurGame(l.km / l.speed)}</span></div>`).join('');
 
             box.innerHTML = `
-                <div class="flex justify-between"><span>Asal &rarr; Tujuan</span><span class="text-gray-300 font-semibold">${esc(origin.nama)} &rarr; ${esc(spbu.nama)}</span></div>
-                <div class="flex justify-between"><span>Estimasi Jarak (1 arah / PP)</span><span class="text-gray-300 font-mono">&plusmn;${Math.round(kmEfektif)} km / &plusmn;${Math.round(kmPP)} km</span></div>
-                <div class="flex justify-between"><span>Kondisi Jalan &amp; Kecepatan</span><span class="text-gray-300 font-mono">${karakterJalan} &middot; rata-rata ${Math.round(speedKmh)} km/j</span></div>
-                <div class="flex justify-between"><span>Estimasi Waktu Tempuh</span><span class="text-gray-300 font-mono">${fmtJam(jamTempuh)}</span></div>
-                <div class="flex justify-between mt-1 pt-1 border-t border-gray-800"><span>Pendapatan Dasar (${truck.cap} ${unitLabel})</span><span class="text-emerald-400 font-mono">${formatRupiah(revenueDasar)}</span></div>
-                <div class="flex justify-between"><span>Bonus Jarak${jarakBonusKm > 0 ? ` (+${Math.round(jarakBonusKm)} km di atas ${ECO.jarakBonusMinKm} km)` : ` (di bawah ${ECO.jarakBonusMinKm} km)`}</span><span class="text-emerald-400 font-mono">+${formatRupiah(bonusJarak)}</span></div>
-                <div class="flex justify-between"><span>Pendapatan Kotor</span><span class="text-emerald-400 font-mono">${formatRupiah(revenueKotor)}</span></div>
-                <div class="flex justify-between"><span>Biaya Kirim Dasar</span><span class="text-red-400 font-mono">-${formatRupiah(biayaKirimDasar)}</span></div>
-                <div class="flex justify-between"><span>Biaya BBM Solar Truk (PP, &plusmn;${Math.round(kmPP)} km)</span><span class="text-red-400 font-mono">-${formatRupiah(totalPP)}</span></div>
-                <div class="flex justify-between"><span>Asuransi Pengantaran (${Math.round(ECO.asuransiPersen * 100)}% nilai muatan)</span><span class="text-red-400 font-mono">-${formatRupiah(biayaAsuransi)}</span></div>
-                <div class="flex justify-between border-t border-gray-800 mt-1 pt-1"><span class="font-bold text-gray-300">Estimasi Pendapatan Bersih</span><span class="font-bold ${revenueBersihEstimasi >= 0 ? 'text-emerald-300' : 'text-red-400'} font-mono">${formatRupiah(revenueBersihEstimasi)}</span></div>
-                <div class="text-[9px] text-gray-500 pt-0.5">*Belum termasuk bonus pesanan (bisa nambah) atau denda pelanggaran dokumen (bisa mengurangi) - baru pasti setelah truk tiba &amp; bongkar muatan.</div>`;
+                <div class="flex justify-between gap-2"><span>Asal &rarr; Tujuan</span><span class="text-gray-300 font-semibold text-right">${esc(origin.nama)} &rarr; ${esc(spbu.nama)}</span></div>
+                <div class="flex flex-wrap gap-1 mt-1">
+                    <span class="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300">${truck.id} &middot; ${truck.cap} ${unitLabel}</span>
+                    <span class="px-1.5 py-0.5 rounded ${depPort ? 'bg-cyan-900/60 text-cyan-300' : 'bg-gray-800 text-gray-300'}">${depPort ? 'Antar pulau (ferry)' : 'Satu pulau'}</span>
+                    <span class="px-1.5 py-0.5 rounded ${allReal ? 'bg-emerald-900/50 text-emerald-300' : 'bg-amber-900/50 text-amber-300'}">${allReal ? 'Rute jalan nyata' : 'Rute perkiraan'}</span>
+                </div>
+                ${head('Rute &amp; Jarak')}
+                ${legRows}
+                ${row('Jarak 1 arah / PP', `&plusmn;${Math.round(kmTotal)} km / &plusmn;${Math.round(kmPP)} km${ferryKm ? ` (ferry ${Math.round(ferryKm)} km)` : ''}`)}
+                ${row('Kondisi jalan', `${karakterJalan} &middot; rata-rata ${Math.round(speedRata)} km/j`)}
+                ${head('Linimasa Siklus (waktu game &middot; ≈ waktu nyata)')}
+                ${bar}
+                ${row('<span class="text-amber-400">&#9632;</span> Muat di depo', `${fmtDurGame(muatH)} &middot; ${fmtRealSec(LOAD_SECONDS)}`)}
+                ${row('<span class="text-emerald-400">&#9632;</span> Perjalanan pergi', `${fmtDurGame(pergiH)} &middot; ${fmtRealSec(realSecOf(pergiH))}`)}
+                ${row('<span class="text-violet-400">&#9632;</span> Bongkar di tujuan', `${fmtDurGame(bongkarH)} &middot; ${fmtRealSec(UNLOAD_SECONDS)}`)}
+                ${row('<span class="text-sky-400">&#9632;</span> Perjalanan pulang', `${fmtDurGame(pulangH)} &middot; ${fmtRealSec(realSecOf(pulangH))}`)}
+                ${row('<b>Total satu siklus</b>', `<b>${fmtDurGame(siklusH)} &middot; ${fmtRealSec(realSecOf(siklusH))}</b>`, 'text-white')}
+                ${row('Perkiraan tiba di SPBU', etaClock(muatH + pergiH), 'text-emerald-300')}
+                ${row('Perkiraan truk kembali ke depo', etaClock(siklusH), 'text-sky-300')}
+                ${head('Skenario Kecepatan Darat')}
+                ${skenario.map(sc => row(`<i class="fa-solid ${sc.ic} mr-1 ${sc.cls}"></i>${sc.nm} (${sc.spTxt})`, `tiba ${fmtDurGame(sc.tiba)} (${etaClock(sc.tiba)}) &middot; balik ${etaClock(sc.balik)}`, sc.cls)).join('')}
+                ${head('Keuangan (per pengiriman)')}
+                ${row(`Pendapatan dasar (${truck.cap} ${unitLabel})`, formatRupiah(revenueDasar), 'text-emerald-400')}
+                ${row(`Bonus jarak${jarakBonusKm > 0 ? ` (+${Math.round(jarakBonusKm)} km di atas ${ECO.jarakBonusMinKm} km)` : ` (di bawah ${ECO.jarakBonusMinKm} km)`}`, '+' + formatRupiah(bonusJarak), 'text-emerald-400')}
+                ${row('Pendapatan kotor', formatRupiah(revenueKotor), 'text-emerald-400')}
+                ${row('Biaya kirim dasar', '-' + formatRupiah(biayaKirimDasar), 'text-red-400')}
+                ${row(`Solar PP est. (±${Math.round(literPP).toLocaleString('id-ID')} L &times; ${formatRupiah(HARGA_SOLAR_TRUK)}, dibayar di pom bensin &middot; tangki ${truckTankL(truck)} L)`, '-' + formatRupiah(totalPP), 'text-red-400')}
+                ${row(`Asuransi (${Math.round(ECO.asuransiPersen * 100)}% nilai muatan)`, '-' + formatRupiah(biayaAsuransi), 'text-red-400')}
+                <div class="flex justify-between border-t border-gray-800 mt-1 pt-1"><span class="font-bold text-gray-300">Estimasi pendapatan bersih</span><span class="font-bold ${bersih >= 0 ? 'text-emerald-300' : 'text-red-400'} font-mono">${formatRupiah(bersih)}</span></div>
+                ${row('Jika pesanan tuntas (bonus +' + Math.round(ECO.bonusPesanan * 100) + '%)', formatRupiah(bersihPlus), 'text-emerald-300')}
+                ${row('Margin bersih / kotor', margin.toFixed(1) + '%', margin >= 0 ? 'text-gray-300' : 'text-red-400')}
+                ${row('Laba per jam game / per km PP', `${formatRupiah(perJam)} / ${formatRupiah(perKm)}`)}
+                ${head('Pemeriksaan Kelayakan')}
+                ${cek.map(c => `<div class="flex gap-1.5 items-start"><i class="fa-solid ${ico[c.s]} mt-0.5"></i><span class="text-gray-300">${c.t}</span></div>`).join('')}
+                <div class="text-[9px] text-gray-500 pt-1">*Perkiraan: kecepatan darat sebenarnya naik-turun di rentang ${SPEED_RANGE[0]}-${SPEED_RANGE[1]} km/j; bonus pesanan hanya cair bila pesanan tuntas, dan denda dokumen/pelanggaran kru (bisa mengurangi) baru pasti setelah bongkar muatan.</div>`;
         }
 
         function distKm(a, b) {
@@ -403,27 +525,12 @@
             return 12742 * Math.asin(Math.sqrt(h));
         }
 
-        // ===== DETEKSI AKSES PELABUHAN (OTOMATIS DARI LAT/LON) =====
-        // Titik acuan kota-kota pesisir besar se-Indonesia. Kilang/Depo dianggap "punya akses laut" (coastal)
-        // kalau jaraknya ke titik acuan terdekat di bawah COASTAL_THRESHOLD_KM - dipakai buat nentuin apakah
-        // sebuah cabang bisa dilayani kapal tanker, atau cuma bisa lewat darat pakai truk.
-        const COASTAL_ANCHORS = [
-            { name: 'Tuban', lat: -6.8979, lon: 112.0649 },
-            { name: 'Jakarta/Tanjung Priok', lat: -6.10, lon: 106.88 }, { name: 'Semarang', lat: -6.95, lon: 110.43 },
-            { name: 'Surabaya', lat: -7.20, lon: 112.75 }, { name: 'Banyuwangi', lat: -8.22, lon: 114.37 },
-            { name: 'Denpasar/Bali', lat: -8.55, lon: 115.22 }, { name: 'Makassar', lat: -5.13, lon: 119.43 },
-            { name: 'Balikpapan', lat: -1.27, lon: 116.83 }, { name: 'Banjarmasin', lat: -3.32, lon: 114.59 },
-            { name: 'Pontianak', lat: -0.02, lon: 109.34 }, { name: 'Tarakan', lat: 3.30, lon: 117.63 },
-            { name: 'Bitung', lat: 1.45, lon: 125.18 }, { name: 'Donggala', lat: -0.68, lon: 119.75 },
-            { name: 'Mamuju', lat: -2.68, lon: 118.89 }, { name: 'Belawan/Medan', lat: 3.78, lon: 98.68 },
-            { name: 'Palembang', lat: -2.99, lon: 104.76 }, { name: 'Padang', lat: -0.95, lon: 100.35 },
-            { name: 'Dumai', lat: 1.68, lon: 101.45 }, { name: 'Jayapura', lat: -2.53, lon: 140.72 },
-            { name: 'Ambon', lat: -3.70, lon: 128.18 }, { name: 'Kupang', lat: -10.17, lon: 123.61 }
-        ];
-        const COASTAL_THRESHOLD_KM = 40;
+        // ===== AKSES PELABUHAN: SATU SUMBER KEBENARAN = field `berth` =====
+        // Tiap Kilang/Depo/Anjungan punya field `berth` = id node dermaga di SEA_NODES (07a-rute-laut.js),
+        // atau null kalau tidak punya dermaga (hanya bisa dilayani jalur darat). Tidak ada lagi deteksi
+        // otomatis lewat jarak ke kota pesisir atau pencocokan nama - dua cara itu pernah saling bertentangan.
         function isCoastal(entity) {
-            if (!entity || entity.lat == null || entity.lon == null) return false;
-            return COASTAL_ANCHORS.some(a => distKm(entity, a) <= COASTAL_THRESHOLD_KM);
+            return !!(entity && entity.berth);
         }
 
         // ===== PENYEBERANGAN FERRY ANTAR PULAU =====
@@ -494,19 +601,45 @@
 
         // Truk berangkat dari kilang/depo aktif terdekat yang cocok dengan jenis muatan
         const stokNeed = (k, cap) => k.unit === 'Bbl' ? Math.ceil(cap * ECO.bblPerKl) : cap;
+        // ===== ATURAN WILAYAH: truk hanya boleh melayani SPBU yang wilayahnya dilayani depo PANGKALAN truk itu =====
+        // (mis. truk pangkalan Semarang TIDAK boleh mengambil pesanan wilayah Tuban, dan sebaliknya). Pemetaan wilayah -> depo
+        // tetap (COVER_BBM/COVER_LPG di 04-produksi-logistik.js, hasilnya di spbu.wilayahBbmId / wilayahLpgId).
+        const truckDepoId = t => (t && t.depotId) || 'KILANG-01';
+        const spbuDepoId = (spbu, type) => spbu ? (type === 'LPG' ? spbu.wilayahLpgId : spbu.wilayahBbmId) : null;
+        const depoNamaOf = id => { const k = refineryData.find(x => x.id === id); return k ? k.nama : (id || '-'); };
+        function truckWilayahBlock(truck, spbu, type) {
+            if (!truck || !spbu || !isSpbuTruck(truck)) return null;
+            const wid = spbuDepoId(spbu, type || truck.type), tid = truckDepoId(truck);
+            if (!wid) return `${spbu.nama} belum masuk jangkauan depo aktif untuk jenis ini.`;
+            if (wid === tid) return null;
+            return `${truck.id} berpangkalan di ${depoNamaOf(tid)}, sedangkan ${spbu.nama} (${spbu.region}) masuk wilayah ${depoNamaOf(wid)}. Truk hanya boleh melayani pesanan di wilayah depo pangkalannya - pindahkan pangkalan truk ke ${depoNamaOf(wid)} atau pakai truk yang berpangkalan di sana.`;
+        }
         function pickOrigin(type, spbu, cap, truck, kapKey) {
             // Untuk BBM: kalau kapKey (jenis BBM yang dipesan) diketahui, kilang/depo baru dianggap "cukup stok"
             // jika tangki produk jadi jenis ITU (kap[kapKey].cur) mencukupi - bukan stok BBL mentah (stok_current),
             // karena BBL mentah & BBM jadi per-jenis adalah dua pool stok yang berbeda.
             const cukupBBM = k => !kapKey ? k.stok_current >= stokNeed(k, cap) : !!(k.kap && k.kap[kapKey] && k.kap[kapKey].cur >= cap);
             const ok = refineryData.filter(k => k.is_unlocked && (k.tipe.includes('Pusat') || k.tipe.includes(type)) && (!cap || (type === 'BBM' ? cukupBBM(k) : (type === 'LPG' && kapKey) ? !!(k.kap && k.kap[kapKey] && k.kap[kapKey].cur >= cap) : true)));
-            // Utamakan kilang/depo yang jadi "wilayah" (radius terdekat) SPBU ini UNTUK JENIS PRODUK INI -
-            // lihat recomputeWilayah(). Dipisah per jenis (BBM/LPG) karena depo cabang bisa cuma khusus salah satunya.
+            // URUTAN PRIORITAS ASAL BERANGKAT:
+            //  1) Depo PANGKALAN truk itu sendiri (truck.depotId) - unit yang sudah ada di depo/cabang berangkat dari sana,
+            //     BUKAN dari kilang wilayah SPBU (dulu wilayah didahulukan, sehingga truk cabang malah berangkat dari Tuban).
+            //  2) Kalau depo pangkalan tidak memenuhi syarat (stok jenis produk kurang / tidak melayani jenis ini),
+            //     baru pakai depo wilayah SPBU untuk jenis produk ini (lihat recomputeWilayah()).
+            //  3) Terakhir, depo terdekat yang memenuhi syarat.
+            // Truk SPBU: WAJIB berangkat dari depo pangkalannya dan hanya untuk SPBU di wilayah depo itu (tidak ada lagi jatuh ke depo lain).
+            if (truck && isSpbuTruck(truck)) { if (truckWilayahBlock(truck, spbu, type)) return null; return ok.find(k => k.id === truckDepoId(truck)) || null; }
+            if (truck && truck.depotId) { const home = ok.find(k => k.id === truck.depotId); if (home) return home; }
             const wilayahId = type === 'LPG' ? spbu.wilayahLpgId : spbu.wilayahBbmId;
             if (wilayahId) { const near = ok.find(k => k.id === wilayahId); if (near) return near; }
-            // Kalau depo wilayah tidak memenuhi syarat (mis. stok kurang), baru coba depo pangkalan (home base) truk itu sendiri.
-            if (truck && truck.depotId) { const home = ok.find(k => k.id === truck.depotId); if (home) return home; }
             return ok.reduce((best, k) => (!best || distKm(k, spbu) < distKm(best, spbu)) ? k : best, null);
+        }
+
+        // Beri tahu pemain kalau truk TIDAK berangkat dari depo pangkalannya (mis. stok produk di depo itu kurang).
+        function notifyAsalBeda(truck, origin, jenis) {
+            if (!truck || !origin || !truck.depotId || truck.depotId === origin.id) return;
+            const home = refineryData.find(k => k.id === truck.depotId);
+            const msg = `${truck.id} berpangkalan di ${home ? home.nama : '-'}, tapi stok ${jenis} di sana kurang, jadi muatan diambil dari ${origin.nama}.`;
+            addLog('ASAL BERANGKAT: ' + msg, 'warning', 'truck'); notify(msg, 'warn');
         }
 
         // Cadangan bila layanan rute tidak terjangkau: jalur berkelok perkiraan (bukan garis lurus)
@@ -550,12 +683,68 @@
             });
             return routeSlotTail;
         }
+        // ===== CACHE RUTE PERMANEN (IndexedDB) =====
+        // routeCache hanya di memori -> hilang tiap refresh, dan saat WiFi mati semua rute yang belum di-cache jadi "rute perkiraan".
+        // Sekarang tiap rute jalan NYATA (hasil server rute) juga disimpan di IndexedDB browser, lalu dimuat lagi saat game dibuka.
+        // Rute pulang (dibalik) diturunkan otomatis saat dimuat, jadi tidak perlu disimpan dua kali. Maks ROUTE_DB_MAX rute (yang terlama dibuang).
+        const ROUTE_DB_MAX = 600;
+        let routeDbPuts = 0;
+        const routeDbOpen = () => new Promise(res => {
+            try {
+                const rq = indexedDB.open('pmid_routes', 1);
+                rq.onupgradeneeded = () => { const st = rq.result.createObjectStore('r', { keyPath: 'k' }); st.createIndex('ts', 'ts'); };
+                rq.onsuccess = () => res(rq.result);
+                rq.onerror = rq.onblocked = () => res(null);
+            } catch (e) { res(null); }
+        });
+        const routeDbReady = (async () => {
+            const db = await routeDbOpen(); if (!db) return 0;
+            return await new Promise(res => {
+                try {
+                    const rq = db.transaction('r').objectStore('r').getAll();
+                    rq.onsuccess = () => {
+                        let n = 0;
+                        (rq.result || []).forEach(r => {
+                            if (!r || !r.k || !Array.isArray(r.pts) || r.pts.length < 2) return;
+                            if (!routeCache.has(r.k)) { routeCache.set(r.k, { pts: r.pts, real: true }); n++; }
+                            const [a, b] = r.k.split('|'), rk = b + '|' + a;
+                            if (!routeCache.has(rk)) routeCache.set(rk, { pts: r.pts.slice().reverse(), real: true });
+                        });
+                        res(n);
+                    };
+                    rq.onerror = () => res(0);
+                } catch (e) { res(0); }
+            });
+        })();
+        function routeDbPut(key, res) {
+            if (!res || !res.real) return;
+            routeDbOpen().then(db => {
+                if (!db) return;
+                try {
+                    const pts = res.pts.map(p => [Math.round(p[0] * 1e5) / 1e5, Math.round(p[1] * 1e5) / 1e5]);
+                    const st = db.transaction('r', 'readwrite').objectStore('r');
+                    st.put({ k: key, pts, ts: Date.now() });
+                    if (++routeDbPuts % 25 === 0) {   // pangkas berkala: buang rute terlama bila melebihi batas
+                        st.count().onsuccess = e => {
+                            let extra = e.target.result - ROUTE_DB_MAX; if (extra <= 0) return;
+                            st.index('ts').openCursor().onsuccess = ev => { const c = ev.target.result; if (c && extra-- > 0) { c.delete(); c.continue(); } };
+                        };
+                    }
+                } catch (err) { /* IndexedDB diblokir/penuh: abaikan, cache memori tetap jalan */ }
+            });
+        }
+        routeDbReady.then(n => { if (n > 0) console.info('[rute] ' + n + ' rute jalan dimuat dari penyimpanan browser.'); });
+
         async function fetchRoute(o, d) {
             const key = `${o.lat},${o.lon}|${d.lat},${d.lon}`;
             if (routeCache.has(key)) return routeCache.get(key);
             if (routeInflight.has(key)) return routeInflight.get(key);
             const job = (async () => {
+                await Promise.race([routeDbReady, new Promise(r => setTimeout(r, 1500))]);   // beri kesempatan cache permanen terbaca dulu
+                if (routeCache.has(key)) return routeCache.get(key);
                 for (let attempt = 0; attempt < ROUTE_MAX_TRY; attempt++) {
+                    // Sedang offline: jangan buang ~10 detik mencoba server rute yang pasti gagal - langsung pakai rute perkiraan.
+                    if (typeof navigator !== 'undefined' && navigator.onLine === false) break;
                     await nextRouteSlot();
                     try {
                         const ctl = new AbortController(), t = setTimeout(() => ctl.abort(), 8000);
@@ -566,6 +755,7 @@
                             const pts = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
                             const res = { pts, real: true };
                             routeCache.set(key, res);
+                            routeDbPut(key, res);
                             const rkey = `${d.lat},${d.lon}|${o.lat},${o.lon}`;
                             if (!routeCache.has(rkey)) routeCache.set(rkey, { pts: pts.slice().reverse(), real: true });
                             return res;

@@ -46,6 +46,15 @@
         saveCloud: (uid, data, ts) => setDoc(doc(db, 'saves', uid), { data, ts }),
         async loadSave(uid) { const s = await getDoc(doc(db, 'saves', uid)); return s.exists() ? s.data() : null; },
         deleteSave: uid => deleteDoc(doc(db, 'saves', uid)),
+        // Buku besar pajak (anti-curang): taxledger/{uid}/lines/{sid}. Rules hanya membolehkan angka NAIK, jadi taxSync
+        // membaca dulu lalu menulis nilai maksimum (klien yang angkanya lebih rendah tidak ditolak, hanya dinaikkan).
+        async taxLoad(uid, sid) { const s = await getDoc(doc(db, 'taxledger', uid, 'lines', sid)); return s.exists() ? s.data() : null; },
+        async taxSync(uid, sid, v) {
+            const ref = doc(db, 'taxledger', uid, 'lines', sid);
+            let old = null; try { const s = await getDoc(ref); old = s.exists() ? s.data() : null; } catch (e) {}
+            const m = k => Math.max(Number(v[k]) || 0, old ? (Number(old[k]) || 0) : 0);
+            return setDoc(ref, { billed: m('billed'), fine: m('fine'), paid: m('paid'), income: m('income'), expense: m('expense'), gt: m('gt'), upd: serverTimestamp() });
+        },
         // Login WAJIB email terverifikasi (Firestore Rules juga menolak akses tanpa email_verified).
         // Kalau belum terverifikasi: kirim ulang link verifikasi, keluar, lalu lempar error 'app/email-not-verified'.
         async login(email, pw) {
@@ -97,6 +106,22 @@
             }
             await b.commit(); return id;
         },
+        // Pass: hanya admin yang boleh menulis (lihat firestore.rules); pemain cukup mendengarkan dokumennya sendiri.
+        adminGrantPass: async (adminUid, uid, tier, days) => {
+            const ref = doc(db, 'passes', uid), v = await getDoc(ref), cur = v.exists() && v.data().tier === tier ? (v.data().until || 0) : 0;
+            const b = writeBatch(db); b.set(ref, { tier, until: Math.max(Date.now(), cur) + days * 86400000, by: adminUid, updated: serverTimestamp() }); await b.commit();
+        },
+        listenPass: (uid, cb) => onSnapshot(doc(db, 'passes', uid), s => cb(s.exists() ? s.data() : null), e => console.warn('Listener pass:', e)),
+        // Jumlah iklan Bursa aktif milik pemain (dicek di server supaya batas slot tetap akurat walau listener Bursa sedang mati)
+        myBursaCount: uid => getDocs(query(collection(db, 'bursa'), where('sellerUid', '==', uid), where('status', '==', 'open'))).then(sn => sn.size),
+        // Isi BBL cabang (khusus admin): admin menulis perintah, klien pemain menerapkannya otomatis lalu menandai selesai.
+        adminFillBbl: async (adminUid, uid) => {
+            const id = 'FILL-' + Date.now() + '-' + uid.slice(0, 6), b = writeBatch(db);
+            b.set(doc(db, 'fills', id), { uid, type: 'bbl_cabang', claimed: false, created: serverTimestamp(), by: adminUid }); await b.commit(); return id;
+        },
+        listenFills: (uid, cb) => onSnapshot(query(collection(db, 'fills'), where('uid', '==', uid), where('claimed', '==', false)),
+            snap => cb(snap.docs.map(d => ({ id: d.id, ...d.data() }))), e => console.warn('Listener fills:', e)),
+        markFillClaimed: id => updateDoc(doc(db, 'fills', id), { claimed: true, claimedAt: serverTimestamp() }),
         markClaimed: id => updateDoc(doc(db, 'topups', id), { claimed: true, claimedAt: serverTimestamp() }),
         // ===== BROADCAST: notifikasi admin ke semua pemain, tersimpan permanen di Firestore =====
         // Kenapa bukan push notification (FCM)? Proyek ini belum menyiapkan service worker/VAPID key.
@@ -139,7 +164,16 @@
         reauth: pw => reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, pw)),
         async deleteAccount() {
             const u = auth.currentUser;
-            try { await deleteDoc(doc(db, 'saves', u.uid)); await deleteDoc(doc(db, 'leaderboard', u.uid)); await deleteDoc(doc(db, 'users', u.uid)); } catch (e) { console.warn('Firestore:', e); }
+            const uid = u.uid, step = async (nama, fn) => { try { await fn(); } catch (e) { console.warn('Hapus akun - ' + nama + ' gagal:', e); } };
+            let kode = ''; await step('baca profil', async () => { const s = await getDoc(doc(db, 'users', uid)); kode = s.exists() ? (s.data().code || '') : ''; });
+            // Iklan Bursa yang masih terbuka ikut dibatalkan (kalau dibiarkan, pembeli bisa "membeli" dari penjual yang sudah tidak ada).
+            await step('iklan bursa', async () => { const sn = await getDocs(query(collection(db, 'bursa'), where('sellerUid', '==', uid), where('status', '==', 'open'))); await Promise.all(sn.docs.map(d => deleteDoc(d.ref))); });
+            await step('save cloud', () => deleteDoc(doc(db, 'saves', uid)));
+            await step('leaderboard', () => deleteDoc(doc(db, 'leaderboard', uid)));
+            if (kode) await step('kode perusahaan', () => deleteDoc(doc(db, 'companyCodes', kode)));   // kode dibebaskan lagi
+            // URUTAN PENTING: profil users/{uid} dihapus DULU, karena rules taxledger baru mengizinkan hapus setelah profil tidak ada.
+            await step('profil', () => deleteDoc(doc(db, 'users', uid)));
+            await step('buku besar pajak', async () => { const sn = await getDocs(collection(db, 'taxledger', uid, 'lines')); await Promise.all(sn.docs.map(d => deleteDoc(d.ref))); });
             await deleteUser(u);
         }
     };

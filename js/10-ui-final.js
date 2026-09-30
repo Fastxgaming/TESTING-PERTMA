@@ -24,12 +24,13 @@
             if (idx < 0) return closeSellModal();
             if (busyIds.has(truckId)) { closeSellModal(); return showModal('Truk Sedang Bertugas', 'Unit yang sedang dalam perjalanan tidak bisa dijual. Tunggu sampai tiba di depot.', 'fa-truck-fast', 'red'); }
             const truck = companyFleet[idx], q = instantSellQuote(truck);
+            if (tolakBelumBalikNama(truck)) { closeSellModal(); return; }
             instantSellBusy = true;
             try {
                 const ok = await showConfirm(`Jual ${truck.id} [${truck.plat}] ke server seharga ${formatRupiah(q.harga)}? Uang langsung masuk kas dan unit tidak bisa dikembalikan.`, { title: 'Jual Instan ke Server', iconClass: 'fa-bolt', theme: 'amber', okLabel: 'Jual Sekarang' });
                 if (!ok) return;
                 const i2 = companyFleet.findIndex(t => t.id === truckId);   // cek ulang: state bisa berubah saat dialog terbuka
-                if (i2 < 0 || busyIds.has(truckId)) { closeSellModal(); return showModal('Tidak Bisa Dijual', 'Status unit berubah saat konfirmasi. Coba lagi.', 'fa-circle-exclamation', 'red'); }
+                if (i2 < 0 || busyIds.has(truckId) || perluBalikNama(companyFleet[i2])) { closeSellModal(); return showModal('Tidak Bisa Dijual', 'Status unit berubah saat konfirmasi. Coba lagi.', 'fa-circle-exclamation', 'red'); }
                 companyFleet.splice(i2, 1);
                 companyCash += q.harga; totalIncome += q.harga;
                 addFinanceLog(`Jual instan ke server: ${truck.name} [${truck.plat}]`, q.harga);
@@ -44,10 +45,12 @@
             const truck = companyFleet.find(t => t.id === truckId);
             if (!truck) return;
             if (busyIds.has(truckId)) return showModal('Truk Sedang Bertugas', 'Truk yang sedang dalam perjalanan tidak bisa dijual. Tunggu sampai tiba di depot.', 'fa-truck-fast', 'red');
+            if (tolakBelumBalikNama(truck)) return;
             if (!currentAccount || !window.fb) return showModal('Belum Siap', 'Firebase belum siap. Periksa koneksi lalu muat ulang halaman.', 'fa-triangle-exclamation', 'red');
             sellModalTruckId = truckId;
             document.getElementById('sell-spec-name').innerText = `${truck.id} - ${truck.name}`;
             document.getElementById('sell-spec-plat').innerText = truck.plat;
+            { const lb = document.getElementById('sell-spec-plat-label'); if (lb) lb.textContent = (truck.kelas === 'kapal' ? 'Tanda Selar' : 'Plat Nomor') + ':'; }
             document.getElementById('sell-spec-cond').innerText = `${truck.odometer.toLocaleString('id-ID')} km \u00b7 ${truck.kelas === 'kapal' ? 'Kondisi Mesin' : 'Ban'} ${truck.banPct}%`;
             document.getElementById('sell-modal-price').value = estimateTruckValue(truck);
             { const q = instantSellQuote(truck);
@@ -81,6 +84,7 @@
         }
 
         async function buyBursaListing(id) {
+            if (pphBlokir()) return;
             const l = bursaListings.find(x => x.id === id);
             if (!l || bursaBuyBusy.has(id) || !currentAccount) return;
             if (l.sellerUid === currentAccount.id) return;
@@ -95,6 +99,7 @@
                     truck.id = 'TRK-' + String(n).padStart(2, '0');
                 }
                 truck.status = 'Sedia';
+                if (!truck.pemilikUid) { truck.pemilikUid = data.sellerUid; truck.pemilik = data.sellerCompany; }   // iklan lama tanpa data pemilik: anggap atas nama penjual
                 if (!refineryData.find(k => k.id === truck.depotId && k.is_unlocked && k.mekanikId)) truck.depotId = 'KILANG-01';
                 companyCash -= data.harga; totalExpense += data.harga;
                 companyFleet.push(truck);
@@ -102,7 +107,7 @@
                 bursaListings = bursaListings.filter(x => x.id !== id);
                 populateTruckDropdowns(); renderFleetDashboard(); updateCashDisplay(); saveGame();
                 addLog(`BURSA P2P: Membeli ${truck.name} [${truck.plat}] dari ${esc(data.sellerCompany)} seharga ${formatRupiah(data.harga)}. Unit ditambahkan ke garasi (${truck.id}).`, 'success');
-                showModal('Pembelian Berhasil', `${truck.name} [${truck.plat}] resmi jadi milik Anda, berpangkalan di ${(refineryData.find(k => k.id === truck.depotId) || {}).nama || 'Kilang Tuban'}.`, 'fa-circle-check', 'blue');
+                showModal('Pembelian Berhasil', `${truck.name} [${truck.plat}] resmi jadi milik Anda, berpangkalan di ${(refineryData.find(k => k.id === truck.depotId) || {}).nama || 'Kilang Tuban'}.\n\nCatatan: unit masih atas nama ${truck.pemilik || data.sellerCompany}. Lakukan Balik Nama lewat tombol Surat di tab Armada (${formatRupiah(balikNamaCost(truck))}) sebelum unit ini bisa dijual lagi.`, 'fa-circle-check', 'blue');
             } catch (e) {
                 if (e.message === 'SOLD') showModal('Sudah Terjual', 'Truk ini baru saja dibeli pemain lain. Cari unit lain di Bursa P2P.', 'fa-circle-exclamation', 'red');
                 else if (e.message !== 'SELF') showModal('Gagal Membeli', 'Coba lagi. (' + (e.code || e.message) + ')', 'fa-triangle-exclamation', 'red');
@@ -120,9 +125,11 @@
         }
 
         function applySave(sv) {
+            supplyReqReset(); // order & reservasi kapal berasal dari sesi sebelumnya: mulai bersih
+            shipOpsReset();   // status kapal, slot dermaga & antrean labuh juga hanya di memori: mulai bersih
             sv = migrateLegacy(sv);
             companyCash = sv.cash; totalIncome = sv.income; totalExpense = sv.expense;
-            sv.refineries.forEach(r => { const k = refineryData.find(x => x.id === r.id); if (k) { k.is_unlocked = r.u; k.stok_current = r.s; if (r.m) k.stok_max = r.m; if (k.id === 'KILANG-01' && k.stok_max < 5000000) k.stok_max = 5000000; /* save lama: naikkan tangki Tuban ke 5 juta Bbl */ if (r.lvl !== undefined) k.stokUpgradeLevel = r.lvl; if (r.mid !== undefined) k.mekanikId = r.mid; if (r.kap) k.kap = r.kap; } });
+            sv.refineries.forEach(r => { const k = refineryData.find(x => x.id === r.id); if (k) { k.is_unlocked = r.u; k.stok_current = r.s; if (r.m) k.stok_max = r.m; if (k.id !== 'KILANG-01' && String(k.tipe).includes('BBM')) k.stok_max = Math.max(k.stok_max || 0, DEPO_BBL_MAX0); /* save lama: tangki mentah depo naik ke 50% Tuban; yang sudah di-upgrade lebih besar tetap */ if (k.id === 'KILANG-01' && k.stok_max < 5000000) k.stok_max = 5000000; /* save lama: naikkan tangki Tuban ke 5 juta Bbl */ k.tutup = !!r.cl; if (r.lvl !== undefined) k.stokUpgradeLevel = r.lvl; if (r.mid !== undefined) k.mekanikId = r.mid; if (r.kap) k.kap = r.kap; /* save lama: tangki LPG dinaikkan ke ukuran baru (yang sudah di-upgrade lebih besar tetap) */ if (k.kap) Object.keys(k.kap).forEach(key => { if (key.startsWith('lpg') && k.kap[key]) k.kap[key].max = Math.max(k.kap[key].max || 0, k.id === 'KILANG-01' ? LPG_TUBAN_MAX0 : LPG_DEPO_MAX0); }); } });
             companyFleet = sv.fleet; companyCrew = sv.crew; crewIdCounter = sv.crewCounter; suratJalanCounter = sv.sj; { const saved = sv.spbu || [], m = new Map(saved.map(s => [s.kode, s]));
               loadedSpbuList = loadedSpbuList.map(s => m.get(s.kode) || s);
               const have = new Set(loadedSpbuList.map(s => s.kode)); saved.forEach(s => { if (!have.has(s.kode)) loadedSpbuList.push(s); }); }
@@ -135,13 +142,17 @@
                 const offlineMs = Math.max(0, Date.now() - sv.ts);
                 if (offlineMs > 0) orders.forEach(o => { o.t += offlineMs; });
             }
-            gameElapsed = sv.clock || 0; huluNormalize(sv.hulu); izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (t.kelas === 'kapal' && t.type === 'BBM' && / KL$/.test(t.name || '')) { t.cap = Math.round(t.cap * ECO.bblPerKl / 100) * 100; t.name = 'Kapal Tanker BBM ' + t.cap.toLocaleString('id-ID') + ' Bbl'; } if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; if (!t.price) t.price = 500e6; }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; pphBilled = sv.pphB != null ? sv.pphB : pphPaid; pphBills = Array.isArray(sv.pphBills) ? sv.pphBills : []; nextPphGt = sv.pphNext || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0;
+            gameElapsed = (sv.clock || 0) * ((sv.gs || 30) / GAME_SPEED); /* sv.gs = GAME_SPEED saat save dibuat (save lama = 30); diskalakan supaya tanggal game tidak mundur */ huluNormalize(sv.hulu); izinLog = sv.izin || { mi: -1, n: 0 }; companyFleet.forEach(t => { if (t.kelas === 'depo' && t.type === 'BBM' && t.cap < 5000) { /* migrasi save lama: KL (<=60) atau Bbl versi lama (<=300) -> skala Bbl baru */ const kl = t.cap <= 60 ? t.cap : t.cap / ECO.bblPerKl, tb = { 16: 10000, 24: 15000, 32: 20000, 36: 22500, 40: 25000 }; const k = Object.keys(tb).map(Number).reduce((a, b) => Math.abs(b - kl) < Math.abs(a - kl) ? b : a); t.cap = tb[k]; t.name = String(t.name || '').replace(/Tangki BBL [\d.]+ (KL|Bbl)/, 'Tangki BBL ' + t.cap.toLocaleString('id-ID') + ' Bbl'); } if (t.kelas === 'kapal' && t.type === 'BBM' && / KL$/.test(t.name || '')) { t.cap = Math.round(t.cap * ECO.bblPerKl / 100) * 100; t.name = 'Kapal Tanker BBM ' + t.cap.toLocaleString('id-ID') + ' Bbl'; } if (!t.kirTs) t.kirTs = Date.parse(t.kir) || gameNow() + 182 * 86400000; if (!t.stnkTs) t.stnkTs = Date.parse(t.stnk) || gameNow() + STNK_PERIOD; if (!t.platTs) t.platTs = gameNow() + PLAT_PERIOD; if (t.kirPending === undefined) t.kirPending = null; if (!t.depotId) t.depotId = 'KILANG-01'; if (t.odometer == null) t.odometer = 0; if (t.banPct == null) t.banPct = 100; truckFuelEnsure(t); if (!t.price) t.price = 500e6; if (!t.pemilikUid && currentAccount) { t.pemilikUid = currentAccount.id; t.pemilik = currentAccount.company; } /* save lama: anggap atas nama PT sendiri */ }); companyCrew.forEach(c => { if (c.kilangId === undefined) c.kilangId = null; }); lastSetor = sv.setor != null ? sv.setor : Math.floor(gameElapsed * GAME_SPEED / (MITRA_CFG.cycleDays * DAY_MS)); loadedSpbuList.forEach(x => { if (x.tipe === 'DODO' && x.is_approved && !x.mitra && !x.blocked) x.mitra = newMitra(x); }); appliedTopups = sv.topups || []; pphPaid = sv.pph || 0; pphBilled = sv.pphB != null ? sv.pphB : pphPaid; pphFineTotal = sv.pphF || 0; pphUtang = sv.pphU || 0; pphSid = typeof sv.psid === 'string' ? sv.psid : ''; pphBills = Array.isArray(sv.pphBills) ? sv.pphBills : []; nextPphGt = sv.pphNext || 0; bbmSpent = sv.bbm || 0; topupTotal = sv.tsetor || 0; supplyQueue = Array.isArray(sv.sup) ? sv.sup : []; autoDispatchOn = sv.adp !== false; passState = { tier: passState.tier, exp: passState.exp, floor: (sv.pass && sv.pass.floor) || 0 }; /* tier/exp hanya dari server (listener) */
+            companyFleet.forEach(shipEnsure); migrasiPlatDaerah(); // kapal save lama belum punya tangki BBM (fuelL): mulai kosong, bunker otomatis saat berlayar
             document.getElementById('finance-history-log').innerHTML = '';
             financeEntries = [];
             (sv.fin || []).forEach(f => addFinanceLog(f.desc, f.amount));
             recomputeWilayah();
             renderRefineries(); renderSpbuOnMap(); populateSpbuDropdowns(); populateTruckDropdowns();
             populateCrewDropdowns(); renderInvestorTab(); renderFleetDashboard(); renderDriversDashboard();
+            activeTrips.clear(); resumeTrips(sv.trips); // perjalanan truk yang sedang jalan saat save terakhir dilanjutkan, bukan hilang
+            // Audit pajak: cek konsistensi lokal sekarang; pencocokan dengan buku besar server jalan di tickPph begitu koneksi siap.
+            pphAuditReset(); { const n = pphAuditLocal(); if (n.length) { pphAuditNote = 'Audit pajak: ' + n.join('; '); addLog('AUDIT PAJAK: ' + n.join('; ') + '.', 'warning'); } }
         }
 
         // Leaderboard: hanya pemain nyata (koleksi Firestore 'leaderboard'); centang biru dari koleksi 'verified'
@@ -155,7 +166,7 @@
         function publishBoard() {
             if (!window.fb || !currentAccount || skipSave) return;
             const st = liveStats();
-            fb.publishStats(currentAccount.id, { company: currentAccount.company, owner: currentAccount.owner, cash: Math.round(st.cash), units: st.units, kilang: st.kilang }).catch(e => console.warn('Leaderboard:', e));
+            fb.publishStats(currentAccount.id, { company: currentAccount.company, owner: currentAccount.owner, cash: Math.round(st.cash - topupTotal), units: st.units, kilang: st.kilang }).catch(e => console.warn('Leaderboard:', e));
         }
         function startVerifiedListener() {
             if (verifiedUnsub || !window.fb || !currentAccount) return;
@@ -177,7 +188,7 @@
         function getBoard() {
             const me = currentAccount ? currentAccount.id : null;
             const rows = boardRows.filter(r => r.uid !== me).map(r => ({ uid: r.uid, name: r.company || '-', owner: r.owner || '-', cash: r.cash || 0, units: r.units || 0, kilang: r.kilang || 0, until: verMap[r.uid] || 0 }));
-            if (currentAccount) rows.push({ uid: me, name: currentAccount.company, owner: currentAccount.owner, ...liveStats(), until: verMap[me] || 0, me: true });
+            if (currentAccount) rows.push({ uid: me, name: currentAccount.company, owner: currentAccount.owner, ...liveStats(), cash: liveStats().cash - topupTotal, until: verMap[me] || 0, me: true });
             return rows;
         }
 
@@ -192,7 +203,7 @@
 
         function renderLeaderboard() {
             const rows = getBoard().sort((a, b) => b[lbSort] - a[lbSort] || b.cash - a.cash || b.units - a.units);
-            document.getElementById('lb-sorts').innerHTML = [['cash', 'Uang', 'fa-coins'], ['units', 'Unit', 'fa-truck'], ['kilang', 'Kilang', 'fa-oil-well']].map(([k, l, ic]) =>
+            document.getElementById('lb-sorts').innerHTML = [['cash', 'Uang (tanpa top up)', 'fa-coins'], ['units', 'Unit', 'fa-truck'], ['kilang', 'Kilang', 'fa-oil-well']].map(([k, l, ic]) =>
                 `<button onclick="setLbSort('${k}')" class="py-1.5 rounded-lg text-[11px] font-bold border transition ${lbSort === k ? 'bg-yellow-500/15 text-yellow-300 border-yellow-500/40' : 'text-gray-400 border-gray-800 hover:border-gray-600'}"><i class="fa-solid ${ic} mr-1"></i>${l}</button>`).join('');
             const my = rows.findIndex(r => r.me);
             document.getElementById('lb-mine').innerHTML = my < 0 ? '' : `<div class="bg-gradient-to-r from-yellow-500/15 via-yellow-500/5 to-transparent border border-yellow-500/30 rounded-lg p-2.5 flex justify-between items-center text-xs"><span class="text-gray-300 flex items-center gap-1.5"><i class="fa-solid fa-user text-yellow-400"></i>Peringkat Anda</span><span class="font-black text-yellow-400 text-base">#${my + 1}<span class="text-[10px] text-gray-500 font-normal"> dari ${rows.length}</span></span></div>`;
@@ -216,7 +227,7 @@
                         <i class="fa-solid ${m.ic} ${m.ictxt}"></i>
                         <div class="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${m.badge} border-2 border-gray-950">${i + 1}</div>
                     </div>
-                    <div class="text-[11px] font-bold ${r.me ? 'text-yellow-300' : 'text-gray-100'} text-center truncate w-full" title="${esc(r.name)}">${esc(r.name)}</div>
+                    <div class="text-[11px] font-bold ${r.me ? 'text-yellow-300' : 'text-gray-100'} flex items-center justify-center gap-1 w-full min-w-0" title="${esc(r.name)}"><span class="truncate">${esc(r.name)}</span><span class="shrink-0">${vbadge(r.until).trim()}</span></div>
                     <div class="text-[9px] text-gray-500 truncate w-full text-center">${fmtShort(r.cash)}</div>
                 </div>`; }).join('');
 
@@ -238,8 +249,8 @@
                 </div>`; }).join('') : '';
         }
 
-        // ===== JAM GAME: 1 menit game = 2 detik nyata (1 jam game = 2 menit nyata, 1 hari game = 48 menit nyata, 1 minggu game = 5,6 jam nyata) =====
-        const GAME_START = new Date(2026, 8, 25, 6, 0, 0).getTime(), GAME_SPEED = 60 / 2; // GAME_SPEED=60/2 -> 1 menit in-game = 2 detik nyata. Pesanan pertama TIDAK lagi menunggu jeda awal: muncul begitu pemain membeli armada (lihat spawnOrderForNewTruck).
+        // ===== JAM GAME: 1 menit game = 10 detik nyata (1 jam game = 10 menit nyata, 1 hari game = 4 jam nyata, 1 minggu game = 28 jam nyata) =====
+        const GAME_START = new Date(2026, 8, 25, 6, 0, 0).getTime(), GAME_SPEED = 60 / 10; // GAME_SPEED=60/10 -> 1 menit in-game = 10 detik nyata (1 jam game = 10 menit nyata, 1 hari game = 4 jam nyata). Pesanan pertama TIDAK lagi menunggu jeda awal: muncul begitu pemain membeli armada (lihat spawnOrderForNewTruck).
         let gameElapsed = 0;
         const gameNow = () => GAME_START + gameElapsed * GAME_SPEED;
         const fmtTime = ms => new Date(ms).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }).replace('.', ':');
@@ -316,6 +327,7 @@
         const FUELS = [
             { id: 'solar', label: 'Solar', cap: 64, color: 'text-amber-400 border-amber-500/40 bg-amber-500/10' },
             { id: 'pertalite', label: 'Pertalite', cap: 64, color: 'text-green-400 border-green-500/40 bg-green-500/10' },
+            { id: 'pertamax', label: 'Pertamax', cap: 48, color: 'text-blue-400 border-blue-500/40 bg-blue-500/10' },
             { id: 'dex', label: 'Dex', cap: 32, color: 'text-teal-300 border-teal-500/40 bg-teal-500/10' },
             { id: 'turbo', label: 'Pertamax Turbo', cap: 32, color: 'text-red-400 border-red-500/40 bg-red-500/10' },
             { id: 'lpg', label: 'LPG', cap: 40, lpg: true, unit: 'Ton', color: 'text-orange-400 border-orange-500/40 bg-orange-500/10' }
@@ -323,16 +335,21 @@
         // Bug fix: dispatch BBM sebelumnya salah mengurangi stok BBL mentah (kilang.stok_current) alih-alih
         // tangki jenis BBM yang benar-benar dipesan SPBU (kilang.kap[key].cur). Mapping ini menghubungkan
         // id jenis BBM di FUELS (dipakai form dispatch) ke key tangki produk jadi di PRODUCT_META/kap.
-        const FUEL_KAP_KEY = { solar: 'solar', pertalite: 'pertalite', dex: 'dexlite', turbo: 'pertamax_turbo' };
+        const FUEL_KAP_KEY = { solar: 'solar', pertalite: 'pertalite', pertamax: 'pertamax', dex: 'dexlite', turbo: 'pertamax_turbo' };
         let orders = [], ordHist = [], orderSeq = 1;
-        const ORDER_BATCH = { BBM: 5, LPG: 3 }, ORDER_TTL = 3 * 24 * 3600000 / GAME_SPEED; // batas maksimal pesanan TERBUKA bersamaan per jenis; TTL: 3 hari game = 72 jam game = 144 menit nyata (1 menit in-game = 2 detik nyata, lihat GAME_SPEED). Setelah durasi ini habis baru pesanan batal
-        // Pesanan baru muncul BERTAHAP satu per satu (bukan langsung penuh sekaligus begitu ada armada pertama),
-        // supaya terasa natural. Jeda dasar antar kemunculan pesanan baru = ORDER_TRICKLE_HOURS jam waktu GAME,
-        // dengan sedikit variasi acak (+-30%) biar tidak terasa seperti metronom. Terus jalan sampai jumlah
-        // pesanan TERBUKA per jenis menyentuh batas ORDER_BATCH di atas.
+        // ===== SISTEM PESANAN (v37): stok SPBU + ikut truk yang nganggur =====
+        // Pesanan tetap LAHIR dari stok SPBU yang menipis, tapi jumlah pesanan yang boleh menunggu dikirim bersamaan mengikuti
+        // jumlah truk yang sedang NGANGGUR (ditambah cadangan), bukan lagi batas tetap 5 BBM / 3 LPG.
+        //  - Pesanan yang sedang dikirim (inTransit) atau terkunci ke satu truk TIDAK menghabiskan slot lagi.
+        //  - Batas = clamp(truk idle + reserve, min, max). min menjamin selalu ada pesanan saat semua truk sedang jalan.
+        //  - Jeda antar pesanan baru menyempit kalau banyak truk idle (lihat orderGapMs).
+        const ORDER_OPEN = { BBM: { min: 3, reserve: 2, max: 20 }, LPG: { min: 2, reserve: 1, max: 10 } };
+        const ORDER_GAP_MIN_GAME = 10, ORDER_GAP_BASE_GAME = 60; // menit GAME: jeda terpendek (banyak truk idle) & jeda dasar (0 truk idle)
+        const ORDER_TTL_DAYS = 7; // durasi pesanan terbuka sebelum batal (hari GAME). 1 hari game = 4 jam nyata -> 7 hari = 28 jam nyata (berhenti saat logout)
+        const ORDER_TTL = ORDER_TTL_DAYS * 24 * 3600000 / GAME_SPEED;
+        // Pesanan baru muncul BERTAHAP satu per satu (bukan langsung penuh sekaligus), jedanya lihat orderGapMs().
         const ORDER_STOK_RATIO = 0.9; // stok SPBU saat memesan = 90% dari kapasitas tangki, sekaligus ambang SPBU mulai memesan (dinaikkan dari 80% supaya pesanan datang lebih cepat, terutama untuk pemain baru dengan sedikit SPBU aktif)
         const ORDER_MAX_TRUCK_RATIO = 0.8; // muatan truk maksimal 80% kapasitas tangki SPBU (batas ukuran truk, DIPISAH dari ambang memesan di atas supaya truk besar yang sebelumnya cocok tidak tiba-tiba ditolak)
-        const ORDER_TRICKLE_HOURS = 1; // jeda antar pesanan baru = tepat 1 jam game (= 2 menit nyata), dihitung sejak pesanan sebelumnya muncul
         let nextOrderGt = 0; // gameNow() paling cepat pesanan baru berikutnya boleh muncul
         // Stok SPBU cuma diturunkan setiap STOK_TICK_MINUTES menit waktu GAME (bukan tiap kali tickStock()
         // dipanggil oleh setInterval, yang jauh lebih sering) - ganti ke 3 kalau mau penurunannya lebih rapat.
@@ -340,7 +357,17 @@
         let nextStockTickGt = 0; // gameNow() paling cepat stok SPBU boleh diturunkan lagi
 
         const fuelsOf = s => FUELS.filter(f => !f.lpg || s.has_lpg);
-        const capsOf = type => [...new Set(companyFleet.filter(t => t.type === type && t.kelas !== 'kapal').map(t => t.cap))];
+        const capsOf = (type, depotId) => [...new Set(companyFleet.filter(t => t.type === type && isSpbuTruck(t) && (!depotId || truckDepoId(t) === depotId)).map(t => t.cap))]; // depotId diisi = hanya armada berpangkalan di depo itu
+        // Slot pesanan per jenis ('BBM'|'LPG'): berapa truk idle, berapa pesanan yang masih menunggu dikirim, dan batasnya.
+        function orderSlots(kind) {
+            const cfg = ORDER_OPEN[kind];
+            const idle = companyFleet.filter(t => t.type === kind && isSpbuTruck(t) && !busyIds.has(t.id)).length;
+            const waiting = orders.filter(o => (kind === 'LPG' ? o.fuel === 'lpg' : o.fuel !== 'lpg') && isOrderDispatchable(o)).length;
+            const cap = Math.min(cfg.max, Math.max(cfg.min, idle + cfg.reserve));
+            return { idle, waiting, cap, open: waiting < cap };
+        }
+        // Jeda pesanan baru (ms game): 60 menit game kalau tidak ada truk idle, makin pendek kalau banyak truk idle, minimal 10 menit game.
+        const orderGapMs = idleTotal => Math.max(ORDER_GAP_MIN_GAME, ORDER_GAP_BASE_GAME / (1 + idleTotal)) * 60000;
         // Tingkat keramaian SPBU menentukan seberapa cepat BBM/LPG habis: rata-rata butuh beberapa hari,
         // bukan hitungan jam. Ramai = kota besar/jalur utama, Sepi = daerah kecil, Sedang = di antaranya.
         const TRAFFIC = { Ramai: { p: 0.25, mult: 1.4, label: 'Ramai' }, Sedang: { p: 0.5, mult: 1.0, label: 'Sedang' }, Sepi: { p: 0.25, mult: 0.6, label: 'Sepi' } };
@@ -360,9 +387,9 @@
         // Begitu pemain beli armada BARU (BBM/LPG - kapal dikecualikan karena tidak melayani SPBU secara
         // langsung, cuma transfer antar kilang/depo), langsung munculkan 1 pesanan SPBU yang ukurannya
         // menyesuaikan kapasitas truk itu - supaya armada baru langsung ada kerjaan, tidak perlu nunggu jeda
-        // acak pesanan otomatis (lihat tickStock/ORDER_TRICKLE_HOURS) yang bisa makan waktu cukup lama.
+        // acak pesanan otomatis (lihat tickStock/orderGapMs) yang bisa makan waktu cukup lama.
         function spawnOrderForNewTruck(truck) {
-            if (truck.kelas === 'kapal') return; // kapal cuma transfer antar Kilang/Depo, tidak pernah melayani SPBU langsung
+            if (!isSpbuTruck(truck)) return; // kapal & truk antar-depo tidak melayani SPBU; kapal cuma transfer antar Kilang/Depo, tidak pernah melayani SPBU langsung
             try {
                 const wantLpg = truck.type === 'LPG';
                 const cand = [];
@@ -375,6 +402,8 @@
                         if (!!f.lpg !== wantLpg) return; // jenis BBM/LPG harus cocok dengan truk yang baru dibeli
                         nApprovedRightFuel++;
                         if (!(f.lpg ? s.wilayahLpgId : s.wilayahBbmId)) return; // SPBU di luar jangkauan depo aktif jenis ini
+                        if ((f.lpg ? s.wilayahLpgId : s.wilayahBbmId) !== truckDepoId(truck)) return; // wilayah depo lain: bukan jatah truk ini
+                        if (depoTutup(f.lpg ? s.wilayahLpgId : s.wilayahBbmId)) return; // depo wilayah ini sedang TUTUP: tidak ada pesanan
                         nInRange++;
                         if (orders.some(o => o.kode === s.kode && o.fuel === f.id)) return; // sudah ada pesanan terbuka jenis ini
                         if (truck.cap > f.cap * ORDER_MAX_TRUCK_RATIO) { nTerlaluBesar++; return; } // pesanan tidak boleh lebih kecil dari muatan truk: tangki SPBU ini terlalu kecil buat truk itu
@@ -396,13 +425,13 @@
                     addLog(`ARMADA ${truck.id}: belum ada pesanan yang bisa dibuat otomatis untuk armada ${label} ini. SPBU aktif: ${nApproved}, jenis ${label} cocok: ${nApprovedRightFuel}, masuk jangkauan 200km Kilang/Depo aktif: ${nInRange}. ${nInRange === 0 ? 'Kemungkinan besar belum ada SPBU jenis ini yang terjangkau dari Kilang/Depo yang sudah dibuka - buka Depo cabang lebih dekat di tab Kilang.' : 'Kemungkinan semua SPBU yang terjangkau sudah punya pesanan terbuka jenis ini - cek tab Pesanan.'}`, 'warning');
                     return;
                 }
-                cand.sort((a, b) => a.ratio - b.ratio); // SPBU dengan stok paling menipis diprioritaskan
-                const { s, f } = cand[0];
+                const { s, f } = pickFairCand(cand, c => c.ratio); // jenis paling tertinggal dulu, lalu SPBU dengan stok paling menipis
                 const kl = truck.cap, unit = f.unit || 'KL'; // ukuran pesanan = kapasitas truk (pesanan lebih kecil dari truk tidak bisa dilayani)
                 s.stok[f.id] = Math.round(f.cap * ORDER_STOK_RATIO * 10) / 10; // stok saat memesan tepat ORDER_STOK_RATIO (90%)
                 orders.push({ id: orderSeq++, kode: s.kode, nama: s.nama, region: s.region, prov: s.provinsi || 'Jawa Timur', fuel: f.id, kl, unit, terkirim: 0, inTransit: 0, tahap: null, lockedTruckId: null, t: Date.now(), gt: gameNow(), status: 'open' });
                 addLog(`PESANAN BARU (Armada ${truck.id}): ${s.nama} (${s.region}) memesan ${kl} ${unit} ${f.label} - ukuran menyesuaikan kapasitas armada baru Anda.`, 'purple');
-                nextOrderGt = gameNow() + ORDER_TRICKLE_HOURS * 3600000; // pesanan otomatis berikutnya baru muncul 1 jam game setelah pesanan pertama ini
+                recordFuelOrder(f.id);
+                nextOrderGt = gameNow() + orderGapMs(0); // pesanan otomatis berikutnya menyusul sesuai jeda dasar
                 notify(`Armada baru siap kerja: pesanan ${kl} ${unit} ${f.label} untuk ${s.nama} menanti dikirim.`, 'info');
                 renderOrders();
             } catch (e) {
@@ -413,10 +442,41 @@
                 console.error('spawnOrderForNewTruck error:', e);
             }
         }
+        // ===== KEADILAN PESANAN (v81): keseimbangan antar jenis BBM/LPG & ukuran pesanan sesuai armada =====
+        // Sebelumnya jenis bahan bakar ditentukan murni oleh SPBU dengan rasio stok paling tipis, dan ukuran pesanan diundi
+        // rata dari daftar ukuran truk yang berbeda (berapa pun jumlah truk tiap ukuran). Hasilnya jenis tertentu bisa
+        // mendominasi dan ukuran pesanan tidak mencerminkan armada. Sekarang:
+        //  1) JENIS: dipilih dengan penjadwalan berbobot. Skor = (pesanan jenis itu di jendela 24 pesanan terakhir + 0,5 x yang masih
+        //     terbuka) / bobot permintaan. Jenis dengan skor terendah (paling "tertinggal") dapat giliran; baru di dalam jenis itu
+        //     dipilih SPBU dengan stok paling tipis. Hanya jenis yang punya kandidat & armada yang mampu ikut dipertimbangkan.
+        //  2) UKURAN: diundi berbobot menurut jumlah truk tiap ukuran (truk idle bobot 3x), dibagi (1 + pesanan terbuka berukuran
+        //     sama) supaya ukuran yang sudah menumpuk mengalah pada ukuran lain yang armadanya belum kebagian kerja.
+        const FUEL_DEMAND_WEIGHT = { pertalite: 3, solar: 3, pertamax: 2, dex: 1, turbo: 1, lpg: 1 };
+        const recentFuelOrders = []; const RECENT_FUEL_WINDOW = 24;
+        function recordFuelOrder(fuelId) { recentFuelOrders.push(fuelId); while (recentFuelOrders.length > RECENT_FUEL_WINDOW) recentFuelOrders.shift(); }
+        function pickFairCand(cand, ratioOf) {
+            const score = fid => (recentFuelOrders.filter(x => x === fid).length + 0.5 * orders.filter(o => o.fuel === fid && o.status === 'open').length) / (FUEL_DEMAND_WEIGHT[fid] || 1);
+            const best = Math.min(...cand.map(c => score(c.f.id)));
+            const pool = cand.filter(c => score(c.f.id) <= best + 1e-9);
+            pool.sort((a, b) => ratioOf(a) - ratioOf(b)); // di dalam jenis yang terpilih: SPBU paling menipis duluan
+            return pool[0];
+        }
+        function pickOrderSize(spbu, f) {
+            const lpg = !!f.lpg, kind = lpg ? 'LPG' : 'BBM', depotId = lpg ? spbu.wilayahLpgId : spbu.wilayahBbmId;
+            const trucks = companyFleet.filter(t => t.type === kind && isSpbuTruck(t) && (!depotId || truckDepoId(t) === depotId) && t.cap <= f.cap * ORDER_MAX_TRUCK_RATIO);
+            if (!trucks.length) return null;
+            const byCap = new Map();
+            trucks.forEach(t => { byCap.set(t.cap, (byCap.get(t.cap) || 0) + (busyIds.has(t.id) ? 1 : 3)); });
+            const entries = [...byCap.entries()].map(([cap, w]) => [cap, w / (1 + orders.filter(o => o.kl === cap && (o.fuel === 'lpg') === lpg && o.status === 'open' && !o.inTransit && !o.lockedTruckId).length)]);
+            let r = Math.random() * entries.reduce((a, e) => a + e[1], 0);
+            for (const [cap, w] of entries) { r -= w; if (r <= 0) return cap; }
+            return entries[entries.length - 1][0];
+        }
         function tickStock() {
             if (gamePaused) return; // jeda manual: stok SPBU & batas waktu pesanan ikut berhenti
             const now = Date.now();
             processKirPending();
+            supplyReqTick(); // order internal: depo cabang yang menipis meminta pasokan ke Kilang Tuban
             tickPph(); // PPh Badan mingguan: terbit tagihan & hitung denda
             orders.slice().forEach(o => { if (now - o.t > ORDER_TTL) {
                 const s = loadedSpbuList.find(x => x.kode === o.kode);
@@ -433,14 +493,18 @@
                 });
                 nextStockTickGt = gameNow() + STOK_TICK_MINUTES * 60000;
             }
-            // Pesanan datang BERTAHAP satu-satu (lihat ORDER_TRICKLE_HOURS/nextOrderGt di atas), bukan langsung
-            // penuh sekaligus - terus jalan sampai jumlah pesanan TERBUKA per jenis menyentuh batas ORDER_BATCH.
+            // Pesanan datang BERTAHAP satu-satu (lihat orderGapMs/nextOrderGt), bukan langsung
+            // penuh sekaligus - terus jalan sampai jumlah pesanan yang MENUNGGU dikirim per jenis menyentuh batas orderSlots().
             // SPBU sudah masuk kandidat pesanan begitu stoknya turun ke antara 90%-100% kapasitas tangki timbun
             // (acak tiap kali dicek) - jadi SPBU minta pasokan lebih dini & bervariasi, selagi stoknya masih
             // cukup banyak, bukan menunggu sampai hampir habis.
-            const ORDER_TRIGGER_RATIO = ORDER_STOK_RATIO; // SPBU baru memesan begitu stoknya turun ke ORDER_STOK_RATIO (90%) tangki
-            const openBBM = orders.filter(o => o.fuel !== 'lpg').length, openLPG = orders.filter(o => o.fuel === 'lpg').length;
-            const slotBBMOpen = openBBM < ORDER_BATCH.BBM, slotLPGOpen = openLPG < ORDER_BATCH.LPG;
+            const ORDER_TRIGGER_RATIO = ORDER_STOK_RATIO; // ambang normal: SPBU memesan begitu stoknya turun ke ORDER_STOK_RATIO (90%) tangki
+            const slotBBM = orderSlots('BBM'), slotLPG = orderSlots('LPG');
+            const slotBBMOpen = slotBBM.open, slotLPGOpen = slotLPG.open;
+            const idleTotal = slotBBM.idle + slotLPG.idle;
+            // Kalau ada truk nganggur yang belum kebagian pesanan (pesanan menunggu < truk idle), ambang dilonggarkan ke 100%:
+            // SPBU mana pun boleh memesan (yang stoknya paling tipis tetap menang duluan), supaya truk tidak nganggur.
+            const trigFor = f => { const sl = f.lpg ? slotLPG : slotBBM; return sl.idle > sl.waiting ? 1 : ORDER_TRIGGER_RATIO; };
             if ((slotBBMOpen || slotLPGOpen) && gameNow() >= nextOrderGt) {
                 // Ukuran pesanan = kapasitas armada milik pemain (BBM: KL, LPG: Ton)
                 const cand = [];
@@ -452,19 +516,19 @@
                     // yang sesuai jenisnya (lihat COVER_BBM/COVER_LPG di 04-produksi-logistik.js) - di luar itu, dianggap
                     // belum terjangkau layanan sama sekali (SPBU tidak akan pernah minta pasokan ke sana).
                     if (f.lpg ? !s.wilayahLpgId : !s.wilayahBbmId) return;
+                    if (depoTutup(f.lpg ? s.wilayahLpgId : s.wilayahBbmId)) return; // depo wilayah ini sedang TUTUP: SPBU tidak memesan
                     const ratio = (s.stok[f.id] || 0) / f.cap;
-                    if (ratio > ORDER_TRIGGER_RATIO) return; // masih di atas ambang (90%-100%), belum perlu pesan
+                    if (ratio > trigFor(f)) return; // masih di atas ambang (90%, atau 100% kalau ada truk idle), belum perlu pesan
                     // Ukuran pesanan HARUS mengikuti kapasitas armada yang benar-benar dimiliki pemain untuk jenis
                     // ini (BBM maupun LPG) - kalau belum punya truk jenis itu sama sekali, jangan buat pesanan
                     // (sama seperti BBM: tidak ada armada = tidak ada pesanan yang bisa/perlu ditawarkan).
-                    const sizes = capsOf(f.lpg ? 'LPG' : 'BBM').filter(c => c <= f.cap * ORDER_MAX_TRUCK_RATIO);
+                    const sizes = capsOf(f.lpg ? 'LPG' : 'BBM', f.lpg ? s.wilayahLpgId : s.wilayahBbmId).filter(c => c <= f.cap * ORDER_MAX_TRUCK_RATIO); // ukuran mengikuti armada depo wilayah SPBU itu saja
                     if (sizes.length) cand.push({ s, f, sizes, r: ratio });
                 }); });
                 if (cand.length) {
                     // SPBU dengan sisa stok (rasio) paling kecil menang duluan - yang paling butuh dilayani lebih dulu.
-                    cand.sort((x, y) => x.r - y.r);
-                    const { s, f, sizes } = cand[0];
-                    const kl = sizes[Math.floor(Math.random() * sizes.length)], unit = f.unit || 'KL';
+                    const { s, f, sizes } = pickFairCand(cand, c => c.r); // jenis paling tertinggal dulu, lalu SPBU paling menipis
+                    const kl = pickOrderSize(s, f) || sizes[Math.floor(Math.random() * sizes.length)], unit = f.unit || 'KL'; // ukuran berbobot menurut armada
                     // inTransit: volume yang sudah "dipesankan" ke armada yang sedang berjalan (belum tentu sampai) -
                     // dipakai supaya pesanan yang sudah dikirim langsung hilang dari daftar terbuka meski belum
                     // dinyatakan Selesai (baru Selesai setelah truk benar-benar tiba & tuntas bongkar muatan).
@@ -473,8 +537,9 @@
                     orders.push({ id: orderSeq++, kode: s.kode, nama: s.nama, region: s.region, prov: s.provinsi || 'Jawa Timur', fuel: f.id, kl, unit, terkirim: 0, inTransit: 0, tahap: null, lockedTruckId: null, t: now, gt: gameNow(), status: 'open' });
                     addLog(`PESANAN OTOMATIS (${fmtTime(gameNow())}): ${s.nama} (${s.region}) memesan ${kl} ${unit} ${f.label} - sisa stok ${s.stok[f.id]} ${unit} (${Math.round(s.stok[f.id] / f.cap * 100)}% dari tangki).`, 'purple');
                     notify(`Pesanan baru masuk: ${s.nama} - ${kl} ${unit} ${f.label}. Buka tab Pesanan.`, 'info');
-                    // Jeda tetap 1 jam game sebelum pesanan berikutnya boleh muncul, biar kedatangannya terasa bertahap.
-                    nextOrderGt = gameNow() + ORDER_TRICKLE_HOURS * 3600000;
+                    recordFuelOrder(f.id);
+                    // Jeda pesanan berikutnya menyesuaikan jumlah truk idle (lihat orderGapMs) - makin banyak truk nganggur, makin cepat.
+                    nextOrderGt = gameNow() + orderGapMs(Math.max(0, idleTotal - 1));
                 }
             }
             const p0 = refineryData[0], pp = p0.stok_current / p0.stok_max;
@@ -500,16 +565,16 @@
             else if (o.inTransit <= 0) o.tahap = null;
             addLog(`PESANAN DIPENUHI: ${truck.cap} ${f.unit || 'KL'} ${f.label} untuk ${spbu.nama}. Bonus pesanan otomatis +${Math.round(ECO.bonusPesanan * 100)}%.`, 'success');
             renderOrders();
-            return Math.round(truck.cap * (f.lpg ? ECO.jualTon : ECO.jualKl) * ECO.bonusPesanan);
+            return Math.round(truck.cap * (f.lpg ? ECO.jualTon : hargaJualKl(f.id)) * ECO.bonusPesanan);
         }
         function kirimPesanan(id) {
+            if (pphBlokir()) return;
             const o = orders.find(x => x.id === id); if (!o) return;
-            if (o.fuel === 'lpg') { document.getElementById('delivery-region-filter').value = 'ALL'; populateSpbuDropdowns('ALL'); document.getElementById('lpg-spbu-select').value = o.kode; switchTab('tab-lpg'); return; }
-            document.getElementById('delivery-region-filter').value = 'ALL';
-            populateSpbuDropdowns('ALL');
-            document.getElementById('delivery-spbu-select').value = o.kode;
-            document.getElementById('delivery-fuel-type').value = fuelLabel(o.fuel);
-            switchTab('tab-delivery');
+            // Dispatch BBM & LPG sekarang otomatis: pesanan yang ditekan "Kirim" cuma diprioritaskan, bukan dipilih manual.
+            const kind = o.fuel === 'lpg' ? 'LPG' : 'BBM';
+            dispatchFocus[kind] = o.id;
+            switchTab(kind === 'LPG' ? 'tab-lpg' : 'tab-delivery');
+            refreshDispatchAuto(kind);
         }
         let ordFuelFilter = 'ALL';
         let ordKilangFilter = 'ALL';
@@ -525,8 +590,8 @@
         const truckFase = new Map();
         const FASE_LABEL = { muat: 'Muat', berangkat: 'Berangkat', tiba: 'Tiba', bongkar: 'Bongkar', kembali: 'Pulang' };
         const docExpired = t => t.kirTs <= gameNow() || t.stnkTs <= gameNow() || t.platTs <= gameNow();
-        const fleetStat = type => {
-            const all = companyFleet.filter(t => t.type === type && t.kelas !== 'kapal');
+        const fleetStat = (type, depotId) => {
+            const all = companyFleet.filter(t => t.type === type && isSpbuTruck(t) && (!depotId || truckDepoId(t) === depotId));
             const idle = all.filter(t => !busyIds.has(t.id)), jalan = all.filter(t => busyIds.has(t.id)), fase = {};
             jalan.forEach(t => { const f = truckFase.get(t.id) || 'muat'; fase[f] = (fase[f] || 0) + 1; });
             return { all, idle, jalan, fase };
@@ -536,8 +601,8 @@
         // ukuran truk vs sisa pesanan, stok depo) tapi tanpa memunculkan modal. cls: 'ok' (hijau) | 'warn' (kuning) | 'bad' (merah).
         function orderUnitStatus(o) {
             const type = o.fuel === 'lpg' ? 'LPG' : 'BBM', unit = type === 'LPG' ? 'Ton' : 'KL';
-            const sp = loadedSpbuList.find(x => x.kode === o.kode), st = fleetStat(type);
-            if (!st.all.length) return { cls: 'bad', txt: `Belum punya truk ${type}` };
+            const sp = loadedSpbuList.find(x => x.kode === o.kode), wid = sp ? spbuDepoId(sp, type) : null, st = fleetStat(type, wid);
+            if (!st.all.length) return { cls: 'bad', txt: wid ? `Belum ada truk ${type} di ${depoNamaOf(wid)}` : `Belum punya truk ${type}`, tip: wid ? `Beli truk ${type} berpangkalan di ${depoNamaOf(wid)}, atau pindahkan pangkalan truk ke sana (tab Armada)` : '' };
             if (!st.idle.length) return { cls: 'bad', txt: `Semua unit jalan`, tip: `${st.jalan.length} unit bertugas: ${faseTxt(st.fase).replace(/&middot;/g, ',')}` };
             const docOk = st.idle.filter(t => !docExpired(t));
             if (!docOk.length) return { cls: 'warn', txt: 'Unit idle, dokumen habis', tip: 'KIR/STNK/Plat kedaluwarsa - perpanjang di tab Armada' };
@@ -564,6 +629,7 @@
         }
         const isOrderDispatchable = o => !o.lockedTruckId && (o.kl - o.terkirim - (o.inTransit || 0)) > 0;
         function renderOrders() {
+            if (typeof refreshDeliveryAuto === 'function') refreshDeliveryAuto(); // pesanan berubah -> rencana dispatch otomatis ikut diperbarui
             const badge = document.getElementById('ord-badge');
             const openCount = orders.filter(isOrderDispatchable).length;
             badge.innerText = openCount; badge.classList.toggle('hidden', !openCount);
@@ -655,7 +721,7 @@
             const histRows = ordHist.map(o => `<div class="flex items-center gap-2 bg-gray-900/70 rounded-lg px-2.5 py-1.5"><span class="w-1.5 h-1.5 rounded-full ${o.status === 'Selesai' ? 'bg-emerald-400' : 'bg-red-400'} shrink-0"></span><span class="truncate text-gray-300 flex-1">${esc(o.nama)} &middot; ${fuelLabel(o.fuel)} ${o.kl} ${o.unit || 'KL'}</span><b class="${o.status === 'Selesai' ? 'text-emerald-400' : 'text-red-400'} shrink-0">${o.status}</b></div>`);
             document.getElementById('ord-hist').innerHTML = prosesRows.concat(histRows).join('') || '<div class="empty-state"><i class="fa-solid fa-clock-rotate-left"></i>Belum ada riwayat.</div>';
         }
-        setInterval(() => { if (currentAccount) tickStock(); }, 6000);
+        setInterval(() => { if (currentAccount) { tickStock(); tickSupply(); tickAutoDispatch(); } }, 6000);
 
         setInterval(saveGame, 30000);
         // Heartbeat leaderboard diperlambat jadi tiap 15 menit (dari 5 menit) - broadcast-nya ke semua pemain

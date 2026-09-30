@@ -36,20 +36,23 @@
             'K1-E1 E1-E2 E2-E3 E3-MK1 MK1-MK2 MK2-MKb MK1-MS1 MS1-MS2 MS2-MS3 MS3-BPb MS2-MMg MMg-MMb MS3-DG1 DG1-DGb ' +
             'E1-BJ1 BJ1-BJ2 BJ2-BJ3 BJ3-BJ4 BJ4-BJb J1-PT1 PT1-PT2 PT2-PT3 PT3-PT4 PT4-PTb ' +
             'DG1-N1 N1-N2 N2-N3 N3-N4 N4-N5 N5-BTg BTg-BTb N2-TK1 TK1-TK2 TK2-TK3 TK3-TKb').split(' ').map(s => s.split('-'));
-        // Dermaga (berth) tiap depo/anjungan - dikenali dari nama. Depo tanpa dermaga (Bandung, Palangka Raya) tidak dilayani kapal.
-        const SEA_BERTH = [[/tuban/i, 'TBb'], [/perak|surabaya/i, 'SBb'], [/plumpang|jakarta/i, 'JKb'], [/emas|semarang/i, 'SMb'],
-            [/manggis|\bbali\b/i, 'MGb'], [/ketapang|banyuwangi/i, 'KTb'], [/makassar/i, 'MKb'], [/balikpapan/i, 'BPb'], [/donggala/i, 'DGb'],
-            [/mamuju/i, 'MMb'], [/banjarmasin/i, 'BJb'], [/pontianak/i, 'PTb'], [/bitung/i, 'BTb'], [/tarakan/i, 'TKb'],
-            [/alpha/i, 'AN_alpha'], [/bravo/i, 'AN_bravo'], [/gamma/i, 'AN_gamma']];
-
         const seaLL = id => ({ lat: SEA_NODES[id][0], lon: SEA_NODES[id][1] });
         const SEA_ADJ = (() => { const g = {}; SEA_LINKS.forEach(([a, b]) => { const w = distKm(seaLL(a), seaLL(b)); (g[a] = g[a] || []).push([b, w]); (g[b] = g[b] || []).push([a, w]); }); return g; })();
-        // Dermaga = titik air; kalau nama tidak dikenali, pakai titik lajur terdekat (fallback aman).
+        // Dermaga = field `berth` pada entitas (id node di SEA_NODES). null/kosong = tidak punya dermaga.
+        // Entitas tanpa field `berth` sama sekali (tidak seharusnya terjadi) jatuh ke titik lajur terdekat + peringatan di konsol.
         function seaNodeOf(e) {
-            const nm = String((e && e.nama) || '');
-            const hit = SEA_BERTH.find(([re]) => re.test(nm));
-            if (hit) return hit[1];
+            if (e && e.berth) return e.berth;
+            if (e && e.berth === null) return null;
+            console.warn('[rute laut] entitas tanpa field berth:', e && e.nama);
             return Object.keys(SEA_NODES).reduce((b, k) => distKm(e, seaLL(k)) < distKm(e, seaLL(b)) ? k : b);
+        }
+        // Pemeriksa data: semua berth harus ada di SEA_NODES dan terhubung ke jaringan lajur (dipanggil saat muat).
+        function seaValidateBerths(list) {
+            (list || []).forEach(e => {
+                if (!e.berth) return;
+                if (!SEA_NODES[e.berth]) console.error('[rute laut] berth tidak dikenal:', e.nama, e.berth);
+                else if (!SEA_ADJ[e.berth]) console.error('[rute laut] berth tidak terhubung ke SEA_LINKS:', e.nama, e.berth);
+            });
         }
         // Dijkstra di graf lajur (kecil, cukup untuk ~90 titik).
         function seaShortest(a, b) {
@@ -88,7 +91,9 @@
         const seaRouteCache = new Map();
         // Rute laut lengkap dari entitas A ke B: {pts, km, ids}. Mengembalikan null bila tak ada lajur.
         function seaRoute(from, to) {
-            const na = seaNodeOf(from), nb = seaNodeOf(to), key = na + '>' + nb;
+            const na = seaNodeOf(from), nb = seaNodeOf(to);
+            if (!na || !nb) return null; // salah satu ujung tidak punya dermaga
+            const key = na + '>' + nb;
             if (seaRouteCache.has(key)) return seaRouteCache.get(key);
             const ids = na === nb ? [na] : seaShortest(na, nb);
             if (!ids) return null;
@@ -100,14 +105,18 @@
             seaRouteCache.set(key, res); seaRouteCache.set(nb + '>' + na, { pts: pts.slice().reverse(), km, ids: ids.slice().reverse() });
             return res;
         }
+        seaValidateBerths(refineryData);
         const seaKm = (a, b) => { const r = seaRoute(a, b); return r ? r.km : distKm(a, b); };
         // Satu pelayaran utuh (tanpa berhenti di tiap titik) - dipakai kapal tanker & kapal anjungan.
-        async function shipVoyage(from, to, meta, fit) {
+        // opts.speedKmh = kecepatan jelajah kapal ini (turun bila mesin aus, lihat shipSpeedKmh di 07b-kapal-dermaga.js).
+        // Hasil menyertakan stallMs = total waktu tertahan cuaca buruk (dipakai untuk BBM mesin menyala saat diam).
+        async function shipVoyage(from, to, meta, fit, opts) {
             const r = seaRoute(from, to);
             if (!r) throw new Error('Tidak ada lajur laut dari ' + from.nama + ' ke ' + to.nama);
-            const dur = (r.km / AVG_SHIP_SPEED_KMH) * (3600000 / GAME_SPEED);
-            await runVehicleLeg(r.pts, dur, { ...meta, vehicle: 'kapal', speedKmh: AVG_SHIP_SPEED_KMH, ease: true }, fit);
-            return { km: r.km, dur };
+            const spd = (opts && opts.speedKmh) || AVG_SHIP_SPEED_KMH;
+            const dur = (r.km / spd) * (3600000 / GAME_SPEED);
+            const t = await runVehicleLeg(r.pts, dur, { ...meta, vehicle: 'kapal', speedKmh: spd, ease: true }, fit);
+            return { km: r.km, dur, stallMs: (t && t.stall) || 0 };
         }
         // Profil kecepatan trapesium: akselerasi 6% awal, cruise, deselerasi 8% akhir. f 0..1 -> jarak 0..1.
         function seaEase(f) {
@@ -115,6 +124,13 @@
             if (f <= 0) return 0; if (f >= 1) return 1;
             return f < a ? v * f * f / (2 * a) : f > 1 - b ? 1 - v * (1 - f) * (1 - f) / (2 * b) : v * a / 2 + v * (f - a);
         }
+
+        // ---- Cuaca buruk: kapal yang sedang berlayar berhenti di posisinya sampai cuaca membaik ----
+        // Jenis cuaca yang menahan kapal (sama dengan aturan "kapal dilarang berlayar" di 11-hulu-upstream.js).
+        // Ubah gelombang ke false kalau hanya badai yang boleh menghentikan kapal di tengah laut.
+        const SEA_HALT_KINDS = { badai: true, gelombang: true };
+        const seaHalted = () => typeof hulu !== 'undefined' && !!hulu.storm && !!hulu.storm.kind && !!SEA_HALT_KINDS[hulu.storm.kind];
+        const seaStormLabel = () => (typeof HULU_STORM !== 'undefined' && HULU_STORM[hulu.storm.kind] ? HULU_STORM[hulu.storm.kind].label : 'Cuaca buruk');
 
         // ---- Overlay pemeriksa lajur (tombol "Lajur" di peta) ----
         let seaDebugLayer = null;

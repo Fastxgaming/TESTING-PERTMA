@@ -183,6 +183,8 @@
                 updateCashDisplay();
                 renderCloudStatus();
                 startTopupListener();
+                startPassListener();
+                startFillListener();
                 startVerifiedListener();
                 startBursaSalesListener();
                 startBanListener();
@@ -306,9 +308,9 @@
         function buildSave() {
             return {
                 cash: companyCash, income: totalIncome, expense: totalExpense,
-                refineries: refineryData.map(k => ({ id: k.id, u: k.is_unlocked, s: k.stok_current, m: k.stok_max, lvl: k.stokUpgradeLevel, mid: k.mekanikId, kap: k.kap })),
+                refineries: refineryData.map(k => ({ id: k.id, u: k.is_unlocked, s: k.stok_current, m: k.stok_max, lvl: k.stokUpgradeLevel, mid: k.mekanikId, cl: !!k.tutup, kap: k.kap })),
                 fleet: companyFleet, crew: companyCrew, crewCounter: crewIdCounter, sj: suratJalanCounter,
-                spbu: loadedSpbuList, fin: financeEntries, orders, ordHist, nextOrderGt, setor: lastSetor, izin: izinLog, clock: gameElapsed, hulu, topups: appliedTopups, pph: pphPaid, pphB: pphBilled, pphBills, pphNext: nextPphGt, bbm: bbmSpent, tsetor: topupTotal, ts: Date.now()
+                spbu: loadedSpbuList, fin: financeEntries, orders, ordHist, nextOrderGt, setor: lastSetor, izin: izinLog, clock: gameElapsed, gs: GAME_SPEED, hulu, topups: appliedTopups, pph: pphPaid, pphB: pphBilled, pphF: pphFineTotal, pphU: pphUtang, psid: pphSid, pphBills, pphNext: nextPphGt, bbm: bbmSpent, tsetor: topupTotal, sup: supplyQueue, trips: [...activeTrips.values()].map(t => ({ ...t })), pass: passState, adp: autoDispatchOn, ts: Date.now()
             };
         }
 
@@ -339,6 +341,7 @@
             if (!currentAccount || cloudBusy) return;
             document.getElementById('btn-cloud-save')?.classList.remove('cloud-remind');
             if (!window.fb) return addLog('CLOUD: Firebase belum siap. Periksa koneksi lalu muat ulang halaman.', 'warning');
+            if (navigator.onLine === false) { notify('Sedang offline - Save Cloud ditunda. Progres tetap tersimpan lokal tiap 30 detik.', 'warn'); return addLog('CLOUD: Perangkat sedang offline, Save Cloud dibatalkan. Coba lagi setelah WiFi menyala (save lokal tetap jalan).', 'warning'); }
             const uid = currentAccount.id, btn = document.getElementById('btn-cloud-save'),
                   lbl = document.getElementById('cloud-label'), bar = document.getElementById('cloud-bar'), ico = document.getElementById('cloud-ico');
             const setUi = (icon, text, pct) => { ico.className = 'fa-solid ' + icon + ' mr-1'; lbl.textContent = text; bar.style.width = pct + '%'; };
@@ -410,12 +413,17 @@
         // ISI: nomor WhatsApp admin (format internasional tanpa +/spasi) dan info pembayaran yang tampil ke pemain
         const TOPUP_ADMIN = { wa: '6285141017508' };
         const TOPUP_PKGS = [
-            { id: 'p500j', label: 'Rp 500 Juta', cash: 500e6, price: 5000, days: 5 },
-            { id: 'p1m', label: 'Rp 1 Miliar', cash: 1e9, price: 10000, days: 10 },
-            { id: 'p5m', label: 'Rp 5 Miliar', cash: 5e9, price: 25000, days: 25 },
-            { id: 'p10m', label: 'Rp 10 Miliar', cash: 10e9, price: 40000, days: 30, tag: 'Hemat' },
-            { id: 'p50m', label: 'Rp 50 Miliar', cash: 50e9, price: 70000, days: 30, tag: 'Hemat' },
-            { id: 'p100m', label: 'Rp 100 Miliar', cash: 100e9, price: 100000, days: 30, tag: 'Terbaik' }
+            { id: 'p250j', label: 'Rp 250 Juta', cash: 250e6, price: 5000, days: 3 },
+            { id: 'p500j', label: 'Rp 500 Juta', cash: 500e6, price: 9000, days: 5 },
+            { id: 'p1m', label: 'Rp 1 Miliar', cash: 1e9, price: 17000, days: 10 },
+            { id: 'p2m5', label: 'Rp 2,5 Miliar', cash: 2.5e9, price: 40000, days: 20 },
+            { id: 'p5m', label: 'Rp 5 Miliar', cash: 5e9, price: 75000, days: 30, tag: 'Terbaik' },
+            { id: 'pass_dasar_7', pass: 'dasar', pdays: 7, label: 'Pass Dasar 7 Hari', price: 15000, cash: 0, days: 0, info: 'Dispatcher otomatis' },
+            { id: 'pass_plus_7', pass: 'plus', pdays: 7, label: 'Pass Plus 7 Hari', price: 25000, cash: 0, days: 0, info: 'Dispatcher + isi ulang depo otomatis' },
+            { id: 'pass_juragan_7', pass: 'juragan', pdays: 7, label: 'Pass Juragan 7 Hari', price: 40000, cash: 0, days: 0, info: 'Semua fitur + slot iklan Bursa P2P 8 (biasa 3)' },
+            { id: 'pass_dasar_28', pass: 'dasar', pdays: 28, label: 'Pass Dasar 28 Hari', price: 50000, cash: 0, days: 0, info: 'Dispatcher otomatis', tag: 'Hemat' },
+            { id: 'pass_plus_28', pass: 'plus', pdays: 28, label: 'Pass Plus 28 Hari', price: 85000, cash: 0, days: 0, info: 'Dispatcher + isi ulang depo otomatis', tag: 'Hemat' },
+            { id: 'pass_juragan_28', pass: 'juragan', pdays: 28, label: 'Pass Juragan 28 Hari', price: 135000, cash: 0, days: 0, info: 'Semua fitur + slot iklan Bursa P2P 8 (biasa 3)', tag: 'Hemat' }
         ];
         // Paket khusus panel admin: tidak melalui pembayaran, jadi tanpa harga (price) dan boleh sampai 10 Triliun
         const ADMIN_PKGS = [
@@ -427,8 +435,16 @@
             { id: 'a100m', label: 'Rp 100 Miliar', cash: 100e9, price: 0, days: 30 },
             { id: 'a500m', label: 'Rp 500 Miliar', cash: 500e9, price: 0, days: 30 },
             { id: 'a1t', label: 'Rp 1 Triliun', cash: 1e12, price: 0, days: 30 },
-            { id: 'a10t', label: 'Rp 10 Triliun', cash: 10e12, price: 0, days: 30 }
+            { id: 'a10t', label: 'Rp 10 Triliun', cash: 10e12, price: 0, days: 30 },
+            { id: 'apass_dasar_7', pass: 'dasar', pdays: 7, label: 'Pass Dasar 7 Hari', price: 0, cash: 0, days: 0 },
+            { id: 'apass_dasar_28', pass: 'dasar', pdays: 28, label: 'Pass Dasar 28 Hari', price: 0, cash: 0, days: 0 },
+            { id: 'apass_plus_7', pass: 'plus', pdays: 7, label: 'Pass Plus 7 Hari', price: 0, cash: 0, days: 0 },
+            { id: 'apass_plus_28', pass: 'plus', pdays: 28, label: 'Pass Plus 28 Hari', price: 0, cash: 0, days: 0 },
+            { id: 'apass_juragan_7', pass: 'juragan', pdays: 7, label: 'Pass Juragan 7 Hari', price: 0, cash: 0, days: 0 },
+            { id: 'apass_juragan_28', pass: 'juragan', pdays: 28, label: 'Pass Juragan 28 Hari', price: 0, cash: 0, days: 0 }
         ];
+        // Pass yang dijual ke pemain (muncul di menu Top Up). Hapus tier dari daftar ini untuk menyembunyikannya; admin tetap bisa memberikannya.
+        const PASS_LIVE = ['dasar', 'plus', 'juragan'];
         const ADMIN_CASH_MAX = 10e12; // batas atas nominal khusus admin: 10 Triliun
         let appliedTopups = [], selTopup = null, topupBusy = false, topupUnsub = null, topupChain = Promise.resolve();
         let banUnsub = null;

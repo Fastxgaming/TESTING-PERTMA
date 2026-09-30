@@ -1,6 +1,6 @@
         // ===== LAYAR LOADING & PLAY GAME (sebelum Daftar/Masuk) =====
         // Satu-satunya tempat untuk update nomor versi - otomatis tampil di layar loading & layar "Main Sekarang".
-        const APP_VERSION = '1.5.0';
+        const APP_VERSION = '1.7.2';
         (function showAppVersion() {
             const label = 'v' + APP_VERSION;
             const a = document.getElementById('app-version-loading'); if (a) a.textContent = label;
@@ -114,7 +114,7 @@
             { icon: 'fa-user-shield', title: '2. Rekrut Supir & Kernet', desc: 'Buka tab SDM Driver untuk merekrut supir dan kernet. Truk butuh keduanya sebelum bisa dikirim ke SPBU, jadi rekrut secukupnya sesuai jumlah armada.' },
             { icon: 'fa-gas-pump', title: '3. Kirim BBM / LPG ke SPBU', desc: 'Buka tab Pesanan SPBU, tekan tombol "Kirim" di pesanan yang mau dilayani, lalu pilih truk + supir + kernet dan tanda tangani Surat Jalan. Pendapatan cair otomatis setelah truk tiba dan selesai bongkar muatan.' },
             { icon: 'fa-bell', title: '4. Pantau Pesanan SPBU', desc: 'Kalau stok BBM di suatu SPBU menipis, SPBU otomatis memesan ke perusahaanmu. Cek tab Pesanan SPBU secara rutin dan kirim sebelum batas waktu habis, atau SPBU beralih ke pesaing.' },
-            { icon: 'fa-right-left', title: '5. Bursa P2P', desc: 'Punya truk nganggur? Buka tab Armada, lalu klik tombol "Jual ke Bursa P2P" di kartu truk yang tidak bertugas untuk langsung pasang iklan (harga wajar otomatis terisi, tinggal sesuaikan). Bisa juga lewat tab Bursa P2P langsung, atau beli truk bekas dari pemain lain dengan harga lebih murah daripada beli baru di Dealer.' },
+            { icon: 'fa-right-left', title: '5. Bursa P2P', desc: 'Punya truk nganggur? Buka tab Armada, lalu klik tombol "Jual ke Bursa P2P" di kartu truk yang tidak bertugas untuk langsung pasang iklan (harga wajar otomatis terisi, tinggal sesuaikan). Bisa juga lewat tab Bursa P2P langsung, atau beli truk bekas dari pemain lain dengan harga lebih murah daripada beli baru di Dealer. Truk bekas masih atas nama PT penjual: lakukan Balik Nama di tab Armada dulu sebelum bisa dijual lagi (Bursa maupun Instan).' },
             { icon: 'fa-trophy', title: '6. Naik Peringkat & Cek Laporan', desc: 'Tab Peringkat membandingkan kas, armada, dan kilang/depo milikmu dengan pemain lain. Tab Laporan menampilkan pemasukan, pengeluaran, dan kewajiban PPh Badan perusahaanmu (ditagih tiap 2 minggu game, telat bayar kena denda).' },
             { icon: 'fa-circle-check', title: 'Selamat Berbisnis!', desc: 'Itu dia dasar-dasarnya. Kamu bisa buka tutorial ini lagi kapan saja lewat tombol Tutorial di bagian atas layar. Selamat membangun kerajaan logistik energimu!' }
         ];
@@ -142,7 +142,9 @@
 
         let companyCash = 650000000;
         // ===== EKONOMI (sesuaikan di sini) =====
-        const ECO = { bblPerKl: 6.2898, jualKl: 10000000, jualTon: 10400000, hppTon: 9500000, bonusPesanan: 0.10, bonusJarakPerKm: 0.0025, asuransiPersen: 0.01, jarakBonusMinKm: 50, jarakBonusCapKm: 300, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000 };
+        const ECO = { bblPerKl: 6.2898, jualKl: 4500000, jualTon: 4500000, hppTon: 2900000, bonusPesanan: 0.10, bonusJarakPerKm: 0.0025, asuransiPersen: 0.01, jarakBonusMinKm: 50, jarakBonusCapKm: 300, gajiSupir: [4500000, 30000], gajiKernet: [3500000, 20000], gajiMekanik: [4000000, 25000], gajiNahkoda: [6000000, 45000], gajiABK: [3800000, 22000], biayaKirimKl: 350000, biayaKirimTon: 500000, biayaOlahBbl: 40000, biayaTransferDaratBbl: 30000, jualKlPerJenis: { solar: 4500000, pertalite: 4700000, pertamax: 5600000, dex: 5400000, turbo: 6600000 } };
+        // Harga jual BBM per KL menurut id jenis di FUELS (solar/pertalite/pertamax/dex/turbo). Id tak dikenal jatuh ke ECO.jualKl.
+        const hargaJualKl = id => (ECO.jualKlPerJenis && ECO.jualKlPerJenis[id]) || ECO.jualKl;
         let totalIncome = 0;
         let totalExpense = 0;
 
@@ -157,11 +159,12 @@
             {
                 id: 'KILANG-01',
                 nama: 'Kilang Tuban',
+                berth: 'TBb', // id node dermaga di SEA_NODES (07a-rute-laut.js). null = tidak punya dermaga
                 tipe: 'Pusat Utama',
                 lat: -6.812400,
                 lon: 111.962100,
                 is_unlocked: true,
-                stok_current: 1000000,
+                stok_current: 1000000, // pemain baru mulai dengan 1 juta Bbl mentah di Tuban (kapasitas tangki tetap 5 juta; save lama memakai nilainya sendiri)
                 stok_max: 5000000,
                 unit: 'Bbl',
                 harga_beli: 0,
@@ -170,6 +173,7 @@
             {
                 id: 'KILANG-02',
                 nama: 'TBBM Perak Surabaya',
+                berth: 'SBb', // id node dermaga di SEA_NODES (07a-rute-laut.js). null = tidak punya dermaga
                 tipe: 'Depo Cabang BBM',
                 lat: -7.201400,
                 lon: 112.728100,
@@ -183,6 +187,7 @@
             {
                 id: 'KILANG-03',
                 nama: 'Depo LPG Gresik',
+                berth: 'SBb', // id node dermaga di SEA_NODES (07a-rute-laut.js). null = tidak punya dermaga
                 tipe: 'Depo Cabang LPG',
                 lat: -7.151200,
                 lon: 112.651200,
